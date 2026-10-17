@@ -1,0 +1,13 @@
+{
+  "name": "BOLBÉ AI Komuta Merkezi",
+  "short_name": "BOLBÉ AI",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f5f0",
+  "theme_color": "#f7f5f0",
+  "lang": "tr",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f7f5f0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>BOLBÉ AI Komuta Merkezi</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<script>
+  try {
+    if (localStorage.getItem("theme") === "dark") {
+      document.documentElement.dataset.theme = "dark";
+      document.querySelector('meta[name="theme-color"]').content = "#0d0d16";
+    }
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/vendor/marked.min.js" defer></script>
+<script src="/static/vendor/purify.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<canvas id="particles" aria-hidden="true"></canvas>
+
+<section id="login" class="login" hidden>
+  <form id="login-form" class="login-card">
+    <div class="brand-mark">BOLBÉ</div>
+    <p class="login-sub">AI Komuta Merkezi</p>
+    <label for="password" class="sr-only">Parola</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="Parola" required>
+    <button type="submit" class="btn btn-gold">Giriş yap</button>
+    <p id="login-error" class="form-error" role="alert"></p>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <a href="#/" class="topbar-brand"><span class="brand-mark sm">BOLBÉ</span><span class="topbar-sub">Komuta Merkezi</span></a>
+    <nav class="nav" aria-label="Sayfalar">
+      <a href="#/" data-route="home"><span class="nav-ico">◎</span><span>Ana ekran</span></a>
+      <a href="#/akislar" data-route="akislar"><span class="nav-ico">⟳</span><span>Akışlar</span></a>
+      <a href="#/onay" data-route="onay"><span class="nav-ico">✓</span><span>Onay</span><b class="nav-badge" id="badge-onay" hidden></b></a>
+      <a href="#/raporlar" data-route="raporlar" class="nav-desk"><span class="nav-ico">▤</span><span>Raporlar</span></a>
+      <a href="#/galeri" data-route="galeri" class="nav-desk"><span class="nav-ico">▣</span><span>Galeri</span></a>
+      <a href="#/dosyalar" data-route="dosyalar" class="nav-desk"><span class="nav-ico">⇪</span><span>Dosyalar</span></a>
+      <a href="#/ayarlar" data-route="ayarlar" class="nav-desk"><span class="nav-ico">⚙</span><span>Ayarlar</span></a>
+      <button type="button" class="nav-more" id="nav-more"><span class="nav-ico">⋯</span><span>Daha</span></button>
+    </nav>
+    <button id="theme-toggle" class="theme-btn" type="button" aria-label="Temayı değiştir">☾</button>
+    <button id="logout" class="btn btn-ghost btn-sm" type="button">Çıkış</button>
+  </header>
+  <div class="sheet" id="more-sheet" hidden>
+    <div class="sheet-card">
+      <a href="#/raporlar">▤ Raporlar</a><a href="#/galeri">▣ Galeri</a><a href="#/dosyalar">⇪ Dosyalar</a><a href="#/ayarlar">⚙ Ayarlar</a>
+      <button type="button" id="theme-m" class="sheet-theme">☾ Koyu tema</button>
+      <button type="button" id="logout-m">Çıkış yap</button>
+    </div>
+  </div>
+  <main id="view" class="container" tabindex="-1"></main>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="lightbox" class="lightbox" hidden></div>
+</body>
+</html>
