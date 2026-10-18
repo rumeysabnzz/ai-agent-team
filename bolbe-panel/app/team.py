@@ -168,7 +168,57 @@ Son olarak haftalık video özetini save_report ile kaydet: üretilen/eksik vide
     },
 ]
 
+# ---------------------------------------------------------------- yöneticiler
+
+MANAGER_ROLE = """Sen {team} takımının Yöneticisisin. Takımın: {members}.
+Görevin takımının gelişimini ve gidişatını kendi içinde kontrol etmek ve Ana Kontrolcüye raporlamak. Kurucuya doğrudan rapor vermezsin.
+Her çalışmada:
+1. team_activity ile takımının son günlerdeki çalıştırmalarını, hatalarını, maliyetini ve kullanıcının onay kararlarını (onay / revize / ret ve notları) incele. Gerekirse read_file ile raporları oku.
+2. Kaliteyi, zamanlamayı, maliyeti ve hedefe uyumu değerlendir.{goal}
+3. Ajanlarına koçluk yap: list_lessons ile her ajanın hafızasını gör. Tekrar eden hatalardan ve kullanıcının revize/ret notlarından çıkan en fazla 2 somut çalışma kuralını add_lesson ile ilgili ajanın hafızasına yaz. Eskimiş, çelişen veya tekrar eden dersleri remove_lesson ile sil.
+4. Dış kaynak: gerekiyorsa web aramasıyla alanındaki güncel iyi uygulamaları araştır (Instagram formatları, algoritma, kategori trendleri) ve kaynaklı, kısa bir bilgi notunu add_knowledge ile takım bilgi bankasına ekle. Kaynaksız bilgi ekleme.
+5. Son mesajın Ana Kontrolcüye takım raporun olsun: durum özeti, takım puanı (1–5) ve gerekçesi, sorunlar, bu hafta verilen dersler, eklenen bilgi notları, gelecek hafta odağı, Kurucunun karar vermesi gereken konular (yoksa "yok").
+Rapor dosyası kaydetme; raporunu Ana Kontrolcü birleştirir."""
+
+MANAGER_GOALS = {
+    "takim-1": " Hedef: her pazartesi eksiksiz rakip raporu ve gerçekten önemli uyarılar (gereksiz alarm vermemek).",
+    "takim-2": " Hedef: her pazartesi uygulanabilir haftalık içerik takvimi, her ayın 1'inde aylık plan.",
+    "takim-3": " Hedef: takvimdeki görsel ve carousel içeriklerinin kullanıma hazır ve onaylanır kalitede üretilmesi.",
+    "takim-4": " Hedef: haftada en az 3 reel ve 5 story; revize oranının düşmesi.",
+}
+
+for _t in TEAMS:
+    _t["manager"] = {
+        "id": f"yonetici-{_t['id']}", "model": "claude-sonnet-5-5", "name": f"{_t['name']} Yöneticisi", "tag": "Yönetici",
+        "effort": "low", "virale": [], "web": True, "manager": True,
+        "role": MANAGER_ROLE.format(team=_t["name"], members=", ".join(a["name"] for a in _t["agents"]),
+                                    goal=MANAGER_GOALS.get(_t["id"], "")),
+    }
+
+CONTROLLER: dict[str, Any] = {
+    "id": "ana-kontrolcu", "model": "claude-sonnet-5-5", "name": "Ana Kontrolcü", "tag": "Kontrol", "effort": "medium",
+    "virale": [], "web": False, "manager": True, "controller": True,
+    "role": """Sen BOLBÉ AI ekibinin Ana Kontrolcüsüsün. Dört takım yöneticisi sana rapor verir; sen de Kurucuya özet sunarsın.
+Görevin:
+1. Yöneticilerin raporlarını oku; gerekirse team_activity ile tüm ekibin verisine bak.
+2. Takımlar arası zinciri kontrol et: rakip raporu → içerik takvimi → görsel/video üretimi → onay. Bir halka aksıyorsa nedenini ve sorumlu takımı belirt.
+3. Yöneticilerin dersleri birbiriyle veya marka kurallarıyla çelişiyorsa list_lessons / remove_lesson / add_lesson ile düzelt.
+4. Bütçeyi ve maliyet eğilimini değerlendir.
+5. save_report ile "Haftalık Yönetim Raporu" kaydet. Bölümler:
+   - yönetici özeti (5 madde)
+   - takım karnesi tablosu (takım | puan 1–5 | durum | ana sorun | gelecek hafta)
+   - ekip genelinde öğrenilenler ve verilen dersler
+   - maliyet
+   - Kurucunun karar vermesi gereken konular (en fazla 3; gerçekten karar gerektirmeyeni yazma)
+   - gelecek hafta öncelikleri
+Kurucuyu gereksiz ayrıntıyla yorma; kısa ve net yaz.""",
+}
+MANAGEMENT_TEAM = {"id": "yonetim", "name": "Yönetim", "icon": "🧭", "color": "#b8860b",
+                   "summary": "Takım yöneticileri ve Ana Kontrolcü; gelişimi ve gidişatı izler."}
+
 AGENTS: dict[str, dict[str, Any]] = {a["id"]: {**a, "team": t["id"]} for t in TEAMS for a in t["agents"]}
+AGENTS.update({t["manager"]["id"]: {**t["manager"], "team": t["id"]} for t in TEAMS})
+AGENTS[CONTROLLER["id"]] = {**CONTROLLER, "team": "yonetim"}
 
 # ---------------------------------------------------------------- iş akışları
 
@@ -204,13 +254,33 @@ WORKFLOWS: list[dict[str, Any]] = [
         "schedule": {"kind": "weekly", "weekday": 2, "hour": 9, "minute": 0},
     },
 ]
+WORKFLOWS.append({
+    "id": "haftalik-yonetim", "team": "yonetim", "name": "Haftalık yönetim değerlendirmesi",
+    "steps": [t["manager"]["id"] for t in TEAMS] + [CONTROLLER["id"]],
+    "brief": "Her takım yöneticisi son 7 günü değerlendirir, ajanlarına ders verir ve gerekirse dış kaynaklardan bilgi ekler; Ana Kontrolcü raporları birleştirip haftalık yönetim raporunu kaydeder.",
+    "schedule": {"kind": "weekly", "weekday": 4, "hour": 17, "minute": 0},
+})
 WORKFLOW_BY_ID = {w["id"]: w for w in WORKFLOWS}
+
+# Revizyon isteği içeriği üreten ajanlara gider (onaya gönderen ajan üretim aracına sahip olmayabilir).
+REVISION_ROUTES: dict[str, list[str]] = {
+    "reel": ["video-uretici", "video-editor"],
+    "story": ["video-uretici", "video-editor"],
+    "görsel": ["gorsel-tasarimci"],
+    "carousel": ["carousel-uzmani"],
+    "metin": ["copywriter"],
+}
 
 
 def public_team_view() -> list[dict[str, Any]]:
     """Arayüze gönderilen takım bilgisi (talimatlar hariç)."""
     return [
         {**{k: t[k] for k in ("id", "name", "icon", "color", "summary")},
-         "agents": [{k: a[k] for k in ("id", "name", "tag")} for a in t["agents"]]}
+         "agents": [{k: a[k] for k in ("id", "name", "tag")} for a in t["agents"]],
+         "manager": {k: t["manager"][k] for k in ("id", "name", "tag")}}
         for t in TEAMS
     ]
+
+
+def public_management_view() -> dict[str, Any]:
+    return {**MANAGEMENT_TEAM, "controller": {k: CONTROLLER[k] for k in ("id", "name", "tag")}}

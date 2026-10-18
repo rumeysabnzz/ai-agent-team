@@ -11,8 +11,10 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import runner, storage
-from .team import AGENTS, WORKFLOW_BY_ID, WORKFLOWS, public_team_view
+from .team import AGENTS, REVISION_ROUTES, WORKFLOW_BY_ID, WORKFLOWS, public_management_view, public_team_view
 
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "")
@@ -137,6 +139,7 @@ async def overview() -> dict[str, Any]:
     alerts = storage.read_state("alerts", [])
     return {
         "teams": public_team_view(),
+        "management": public_management_view(),
         "live": list(runner.bus.live.values()),
         "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
         "budget": {"month": runner.month_key(), "spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
@@ -302,7 +305,13 @@ class ApprovalAction(BaseModel):
 
 @app.get("/api/approvals", dependencies=auth)
 async def approvals() -> list[dict[str, Any]]:
-    return storage.read_state("approvals", [])
+    items = storage.read_state("approvals", [])
+    runs = {r["id"]: r for r in storage.read_state("runs_index", [])}
+    for item in items:
+        run = runs.get(item.get("revision_run", ""))
+        if run:
+            item["revision_status"], item["revision_error"] = run["status"], run.get("error")
+    return items
 
 
 @app.post("/api/approvals/{item_id}", dependencies=auth)
@@ -318,13 +327,32 @@ async def act_on_approval(item_id: str, body: ApprovalAction) -> dict[str, Any]:
     label = {"approve": "Onaylandı", "reject": "Reddedildi", "revise": "Revize istendi"}[body.action]
     await storage.log_activity(f"{label}: {item['title']}", "approval")
     result: dict[str, Any] = {"ok": True, "item": item}
+    # Kullanıcının kararı ve notu, içeriği üreten ajanların hafızasına ders olarak yazılır.
+    agent = AGENTS.get(item["agent"], {})
+    steps = [item["agent"]] if agent.get("media") else REVISION_ROUTES.get(item["kind"], [item["agent"]])
+    if body.note.strip() or body.action == "reject":
+        verdict = {"approve": "onayladı", "reject": "reddetti", "revise": "revize istedi"}[body.action]
+        text = f"Kullanıcı {item['kind']} içeriğini {verdict} (\"{item['title'][:80]}\")" + (f": {body.note.strip()[:400]}" if body.note.strip() else ".")
+        for agent_id in dict.fromkeys(steps + [item["agent"]]):
+            await runner.add_lesson(agent_id, text, "Kurucu geri bildirimi")
     if body.action == "revise":
         _guard_budget()
-        prompt = (f"Kullanıcı şu içeriğin revizyonunu istedi.\n\nTür: {item['kind']}\nBaşlık: {item['title']}\n"
-                  f"Medya: {', '.join(item['media']) or 'yok'}\n\nMevcut içerik:\n{item['body']}\n\n"
+        names = " → ".join(AGENTS[a]["name"] for a in steps)
+        prompt = (f"Kullanıcı şu içeriğin revizyonunu istedi. Revizyon sırası: {names}.\n\nTür: {item['kind']}\nBaşlık: {item['title']}\n"
+                  f"Önceki sürümü hazırlayan: {item['agent_name']}\nMevcut medya: {', '.join(item['media']) or 'yok'}\n\n"
+                  f"Mevcut içerik:\n{item['body']}\n\n"
                   f"Kullanıcının geri bildirimi:\n{body.note or '(not yok, kaliteyi artır)'}\n\n"
-                  "Geri bildirime göre içeriği yenile ve yeni sürümü onaya gönder.")
-        result["run"] = runner.start_agent_task(item["agent"], f"Revizyon: {item['title']}", prompt).summary()
+                  "Geri bildirime göre içeriği baştan yenile. Görsel veya video içeriyorsa yeni medyayı Virale ile üret, üretim bitene kadar "
+                  "durumunu kontrol et ve panele kaydet. Son adımda yeni sürümü submit_for_approval ile onaya gönder; "
+                  "üretim yapılamazsa nedenini gövdeye yazarak yine onaya gönder.")
+        run = runner.start_revision(item, steps, prompt)
+        async with storage.state_lock:
+            items = storage.read_state("approvals", [])
+            for i in items:
+                if i["id"] == item_id:
+                    i["revision_run"] = run.id
+            storage.write_state("approvals", items)
+        result["run"] = run.summary()
     return result
 
 
@@ -340,6 +368,106 @@ async def alerts_read() -> dict[str, Any]:
         for a in items:
             a["read"] = True
         storage.write_state("alerts", items)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- takvim
+
+
+def _day_of(iso: str | None) -> str:
+    return runner._local_day(iso or "")
+
+
+@app.get("/api/calendar", dependencies=auth)
+async def calendar(month: str = "") -> dict[str, Any]:
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        month = runner.month_key()
+    days: dict[str, dict[str, int]] = {}
+
+    def bump(day: str, key: str) -> None:
+        if day.startswith(month):
+            days.setdefault(day, {}).setdefault(key, 0)
+            days[day][key] += 1
+
+    for r in storage.read_state("runs_index", []):
+        bump(_day_of(r["created"]), "runs")
+    for area, key in (("reports", "reports"), ("media", "media")):
+        for f in storage.list_area(area):
+            bump(_day_of(f["modified"]), key)
+    for a in storage.read_state("approvals", []):
+        bump(_day_of(a["created"]), "approvals")
+    for a in storage.read_state("alerts", []):
+        bump(_day_of(a["time"]), "alerts")
+    return {"month": month, "today": datetime.now(runner.TZ).strftime("%Y-%m-%d"), "days": days}
+
+
+@app.get("/api/day/{day}", dependencies=auth)
+async def day_detail(day: str) -> dict[str, Any]:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "Tarih YYYY-AA-GG olmalı")
+    return {
+        "day": day,
+        "runs": [r for r in storage.read_state("runs_index", []) if _day_of(r["created"]) == day],
+        "reports": [f for f in storage.list_area("reports") if _day_of(f["modified"]) == day],
+        "media": [f for f in storage.list_area("media") if _day_of(f["modified"]) == day],
+        "approvals": [a for a in storage.read_state("approvals", []) if _day_of(a["created"]) == day],
+        "alerts": [a for a in storage.read_state("alerts", []) if _day_of(a["time"]) == day],
+        "activity": [a for a in storage.read_state("activity", []) if _day_of(a["time"]) == day],
+    }
+
+
+# ---------------------------------------------------------------- gelişim: hafıza ve bilgi bankası
+
+
+@app.get("/api/development", dependencies=auth)
+async def development() -> dict[str, Any]:
+    memory = storage.read_state("memory", {})
+    reports = [f for f in storage.list_area("reports") if "yonetim" in f["name"]][:12]
+    return {"memory": {aid: memory.get(aid, []) for aid in AGENTS},
+            "knowledge": storage.read_state("knowledge", {}),
+            "management_reports": reports,
+            "last_management_run": next((r for r in storage.read_state("runs_index", [])
+                                         if r.get("workflow") == "haftalik-yonetim"), None)}
+
+
+class LessonBody(BaseModel):
+    text: str = Field(min_length=3, max_length=600)
+
+
+@app.post("/api/development/lessons/{agent_id}", dependencies=auth)
+async def post_lesson(agent_id: str, body: LessonBody) -> dict[str, Any]:
+    if agent_id not in AGENTS:
+        raise HTTPException(404, "Ajan bulunamadı")
+    lesson = await runner.add_lesson(agent_id, body.text, "Kurucu")
+    await storage.log_activity(f"Ders eklendi → {AGENTS[agent_id]['name']}", "info")
+    return lesson
+
+
+@app.delete("/api/development/lessons/{agent_id}/{lesson_id}", dependencies=auth)
+async def delete_lesson(agent_id: str, lesson_id: str) -> dict[str, Any]:
+    if agent_id not in AGENTS or not await runner.remove_lesson(agent_id, lesson_id):
+        raise HTTPException(404, "Ders bulunamadı")
+    return {"ok": True}
+
+
+class KnowledgeBody(BaseModel):
+    team: str = Field(pattern=r"^(genel|takim-[1-4])$")
+    title: str = Field(min_length=2, max_length=160)
+    text: str = Field(min_length=3, max_length=1500)
+    source_url: str = Field("", max_length=400)
+
+
+@app.post("/api/development/knowledge", dependencies=auth)
+async def post_knowledge(body: KnowledgeBody) -> dict[str, Any]:
+    note = await runner.add_knowledge(body.team, body.title, body.text, body.source_url, "Kurucu")
+    await storage.log_activity(f"Bilgi bankasına not eklendi: {body.title}", "info")
+    return note
+
+
+@app.delete("/api/development/knowledge/{team}/{note_id}", dependencies=auth)
+async def delete_knowledge(team: str, note_id: str) -> dict[str, Any]:
+    if not await runner.remove_knowledge(team, note_id):
+        raise HTTPException(404, "Not bulunamadı")
     return {"ok": True}
 
 

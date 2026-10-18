@@ -16,7 +16,7 @@ import mimetypes
 import os
 import socket
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -26,7 +26,7 @@ import anthropic
 import httpx
 
 from . import storage
-from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, WORKFLOW_BY_ID, WORKFLOWS
+from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, TEAMS, WORKFLOW_BY_ID, WORKFLOWS
 
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
 VIRALE_MCP_TOKEN = os.getenv("VIRALE_MCP_TOKEN", "")
@@ -209,7 +209,133 @@ CUSTOM_TOOLS: dict[str, dict[str, Any]] = {
                                         "title": {"type": "string"}, "detail": {"type": "string"}}},
     },
 }
-BASE_TOOLS = ["list_files", "read_file", "save_report"]
+CUSTOM_TOOLS.update({
+    "add_lesson": {
+        "description": "Bir ajanın kalıcı hafızasına kısa bir çalışma dersi ekler; ajan sonraki tüm çalışmalarında bunu okur. "
+                       "Ajanlar yalnız kendi kimliklerine, yöneticiler kendi takımlarındaki ajanlara, Ana Kontrolcü herkese ders ekleyebilir.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["agent_id", "text"],
+                         "properties": {"agent_id": {"type": "string"}, "text": {"type": "string"}}},
+    },
+    "list_lessons": {
+        "description": "Bir ajanın hafızasındaki dersleri kimlikleriyle listeler.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["agent_id"],
+                         "properties": {"agent_id": {"type": "string"}}},
+    },
+    "remove_lesson": {
+        "description": "Bir ajanın hafızasından eskimiş, çelişen veya tekrar eden bir dersi siler.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["agent_id", "lesson_id"],
+                         "properties": {"agent_id": {"type": "string"}, "lesson_id": {"type": "string"}}},
+    },
+    "add_knowledge": {
+        "description": "Takımın bilgi bankasına dış kaynaktan (web) edinilmiş kısa, kaynaklı bir bilgi notu ekler. Takımın tüm ajanları bunu okur.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["title", "text", "source_url"],
+                         "properties": {"title": {"type": "string"}, "text": {"type": "string"}, "source_url": {"type": "string"}}},
+    },
+    "team_activity": {
+        "description": "Takımın (Ana Kontrolcü için tüm ekibin) son günlerdeki çalıştırmalarını, hatalarını, maliyetini, "
+                       "onay kararlarını ve kullanıcı notlarını özetler.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["days"],
+                         "properties": {"days": {"type": "integer"}}},
+    },
+})
+BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson"]
+MANAGER_TOOLS = ["list_lessons", "remove_lesson", "add_knowledge", "team_activity"]
+MAX_LESSONS = 25
+
+
+# ---------------------------------------------------------------- hafıza ve bilgi bankası
+
+def lessons_for(agent_id: str) -> list[dict[str, Any]]:
+    return storage.read_state("memory", {}).get(agent_id, [])
+
+
+async def add_lesson(agent_id: str, text: str, source: str) -> dict[str, Any]:
+    lesson = {"id": uuid.uuid4().hex[:8], "time": storage.now(), "source": source, "text": text.strip()[:600]}
+    async with storage.state_lock:
+        memory = storage.read_state("memory", {})
+        items = memory.setdefault(agent_id, [])
+        items.append(lesson)
+        memory[agent_id] = items[-MAX_LESSONS:]
+        storage.write_state("memory", memory)
+    return lesson
+
+
+async def remove_lesson(agent_id: str, lesson_id: str) -> bool:
+    async with storage.state_lock:
+        memory = storage.read_state("memory", {})
+        before = memory.get(agent_id, [])
+        memory[agent_id] = [x for x in before if x["id"] != lesson_id]
+        storage.write_state("memory", memory)
+    return len(before) != len(memory[agent_id])
+
+
+def knowledge_for(team_id: str) -> list[dict[str, Any]]:
+    kb = storage.read_state("knowledge", {})
+    return kb.get("genel", []) + (kb.get(team_id, []) if team_id != "genel" else [])
+
+
+async def add_knowledge(team_id: str, title: str, text: str, source_url: str, added_by: str) -> dict[str, Any]:
+    note = {"id": uuid.uuid4().hex[:8], "time": storage.now(), "title": title.strip()[:160], "text": text.strip()[:1500],
+            "source_url": source_url.strip()[:400], "added_by": added_by}
+    async with storage.state_lock:
+        kb = storage.read_state("knowledge", {})
+        kb.setdefault(team_id, []).append(note)
+        kb[team_id] = kb[team_id][-40:]
+        storage.write_state("knowledge", kb)
+    return note
+
+
+async def remove_knowledge(team_id: str, note_id: str) -> bool:
+    async with storage.state_lock:
+        kb = storage.read_state("knowledge", {})
+        before = kb.get(team_id, [])
+        kb[team_id] = [x for x in before if x["id"] != note_id]
+        storage.write_state("knowledge", kb)
+    return len(before) != len(kb[team_id])
+
+
+def team_members(team_id: str) -> list[str]:
+    return [a["id"] for t in TEAMS if t["id"] == team_id for a in t["agents"]]
+
+
+def _can_coach(agent: dict[str, Any], target: str) -> bool:
+    if target not in AGENTS:
+        return False
+    if agent.get("controller"):
+        return True
+    if agent.get("manager"):
+        return target in team_members(agent["team"]) or target == agent["id"]
+    return target == agent["id"]
+
+
+def _local_day(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return ""
+
+
+def team_activity(team_id: str | None, days: int) -> dict[str, Any]:
+    """Yöneticiler için özet. team_id None ise tüm ekip (Ana Kontrolcü)."""
+    since = (datetime.now(TZ) - timedelta(days=max(1, min(days, 31)))).astimezone(timezone.utc).isoformat()
+    members = set(team_members(team_id)) if team_id else set(AGENTS)
+    runs = [r for r in storage.read_state("runs_index", []) if r["created"] >= since and members & set(r["steps"])]
+    approvals = [a for a in storage.read_state("approvals", []) if a["created"] >= since and a["agent"] in members]
+    stats: dict[str, int] = {}
+    for a in approvals:
+        stats[a["status"]] = stats.get(a["status"], 0) + 1
+    return {
+        "donem_gun": days,
+        "calistirmalar": [{k: r.get(k) for k in ("title", "status", "created", "cost", "error")}
+                          | {"ciktilar": [o.get("name") or o.get("title") for o in r.get("outputs", [])][:12]} for r in runs[:40]],
+        "toplam_maliyet_usd": round(sum(r.get("cost", 0) for r in runs), 4),
+        "hatali_calistirma": sum(1 for r in runs if r["status"] == "failed"),
+        "onay_durumlari": stats,
+        "kullanici_notlari": [{"ajan": a["agent_name"], "tur": a["kind"], "baslik": a["title"], "karar": a["status"], "not": a["note"]}
+                              for a in approvals if a.get("note")][:30],
+        "hafiza_ders_sayisi": {m: len(lessons_for(m)) for m in sorted(members)},
+        "aylik_harcama_usd": month_spend(),
+    }
 
 
 def tool_names_for(agent: dict[str, Any]) -> list[str]:
@@ -220,6 +346,8 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
         names += ["submit_for_approval"]
     if agent.get("alerts"):
         names.append("raise_alert")
+    if agent.get("manager"):
+        names += MANAGER_TOOLS
     return names
 
 
@@ -296,8 +424,13 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         item = {"id": uuid.uuid4().hex[:12], "created": storage.now(), "run_id": run.id, "agent": agent["id"],
                 "agent_name": agent["name"], "team": agent["team"], "kind": args["kind"], "title": args["title"][:200],
                 "body": args["body"], "media": media, "status": "pending", "note": ""}
+        if run.revision_of:
+            item["revision_of"] = run.revision_of
         async with storage.state_lock:
             items = storage.read_state("approvals", [])
+            for old in items:
+                if run.revision_of and old["id"] == run.revision_of:
+                    old["revised_by"] = item["id"]
             items.insert(0, item)
             storage.write_state("approvals", items[:500])
         run.outputs.append({"type": "approval", "id": item["id"], "title": item["title"]})
@@ -305,6 +438,30 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         bus.publish({"type": "approval", "item": {k: item[k] for k in ("id", "kind", "title", "agent_name")}})
         missing = set(args.get("media", [])) - set(media)
         return f"Onaya gönderildi (kimlik {item['id']})." + (f" Bulunamayan medya: {', '.join(missing)}" if missing else "")
+    if name == "add_lesson":
+        if not _can_coach(agent, args["agent_id"]):
+            raise ValueError(f"{args['agent_id']} için ders ekleme yetkin yok")
+        source = "öz değerlendirme" if args["agent_id"] == agent["id"] else agent["name"]
+        lesson = await add_lesson(args["agent_id"], args["text"], source)
+        run.emit("lesson", agent=agent["id"], target=args["agent_id"], text=_short(lesson["text"], 300))
+        return f"Ders eklendi ({lesson['id']})."
+    if name == "list_lessons":
+        if not _can_coach(agent, args["agent_id"]):
+            raise ValueError(f"{args['agent_id']} için yetkin yok")
+        return json.dumps(lessons_for(args["agent_id"]), ensure_ascii=False)
+    if name == "remove_lesson":
+        if not _can_coach(agent, args["agent_id"]):
+            raise ValueError(f"{args['agent_id']} için yetkin yok")
+        ok = await remove_lesson(args["agent_id"], args["lesson_id"])
+        return "Silindi." if ok else "Ders bulunamadı."
+    if name == "add_knowledge":
+        team_id = "genel" if agent.get("controller") else agent["team"]
+        note = await add_knowledge(team_id, args["title"], args["text"], args["source_url"], agent["name"])
+        run.emit("knowledge", agent=agent["id"], text=_short(note["title"], 200))
+        return f"Bilgi notu eklendi ({note['id']})."
+    if name == "team_activity":
+        data = team_activity(None if agent.get("controller") else agent["team"], int(args["days"]))
+        return json.dumps(data, ensure_ascii=False)[:15000]
     if name == "raise_alert":
         alert = {"id": uuid.uuid4().hex[:10], "time": storage.now(), "level": args["level"], "title": args["title"][:200],
                  "detail": args["detail"], "agent": agent["name"], "run_id": run.id, "read": False}
@@ -337,11 +494,13 @@ class Run:
         self.generations = 0
         self.error: str | None = None
         self.current_agent: str | None = None
+        self.revision_of: str | None = None
 
     def summary(self) -> dict[str, Any]:
         return {"id": self.id, "kind": self.kind, "title": self.title, "workflow": self.workflow, "trigger": self.trigger,
                 "status": self.status, "created": self.created, "finished": self.finished, "steps": self.steps,
-                "current_agent": self.current_agent, "cost": round(self.cost, 4), "outputs": self.outputs, "error": self.error}
+                "current_agent": self.current_agent, "cost": round(self.cost, 4), "outputs": self.outputs, "error": self.error,
+                "revision_of": self.revision_of}
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.summary(), "brief": self.brief, "tokens": self.tokens, "events": self.events[-600:],
@@ -381,6 +540,22 @@ def _system_prompt(agent: dict[str, Any], settings: dict[str, Any]) -> str:
             + (f"\n\n## Araçlar\n{virale}" if virale else ""))
 
 
+def _memory_prompt(agent: dict[str, Any]) -> str:
+    """Değişken kısım: sistem isteminin önbelleğe alınan sabit bölümünden sonra ilk kullanıcı mesajına eklenir."""
+    parts = [f"Kimliğin: {agent['id']}."]
+    lessons = lessons_for(agent["id"])[-15:]
+    if lessons:
+        parts.append("## Hafızan (geçmiş çalışmalardan ve geri bildirimlerden öğrendiklerin; bunlara uy)\n"
+                     + "\n".join(f"- {x['text']} ({x['source']}, {_local_day(x['time'])})" for x in lessons)[:3500])
+    notes = knowledge_for(agent["team"])[-12:]
+    if notes:
+        parts.append("## Takım bilgi bankası (dış kaynaklı notlar)\n"
+                     + "\n".join(f"- **{n['title']}**: {n['text']}" + (f" [{n['source_url']}]" if n["source_url"] else "")
+                                  for n in notes)[:4000])
+    parts.append("İşin sonunda, gelecekte işine yarayacak yeni bir ders çıkardıysan add_lesson ile kendi hafızana en fazla 1 kısa ders ekle.")
+    return "\n\n".join(parts)
+
+
 def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     tools: list[dict[str, Any]] = [
         {"name": n, "description": CUSTOM_TOOLS[n]["description"], "input_schema": CUSTOM_TOOLS[n]["input_schema"], "strict": True}
@@ -411,7 +586,7 @@ async def run_agent(run: Run, agent_id: str, task: str) -> str:
     tools, mcp_servers = _tools_for(agent, model)
     betas = ([FALLBACK_BETA] if MODELS[model]["fallback"] else []) + ([MCP_BETA] if mcp_servers else [])
     today = datetime.now(TZ).strftime("%d.%m.%Y %A")
-    messages: list[dict[str, Any]] = [{"role": "user", "content": f"Bugün: {today}\n\n{task}"}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": f"Bugün: {today}\n\n{_memory_prompt(agent)}\n\n{task}"}]
     ctx = ToolContext(run, agent)
     run.current_agent = agent_id
     run.emit("agent_start", agent=agent_id, agent_name=agent["name"], team=agent["team"], model=MODELS[model]["label"])
@@ -559,6 +734,12 @@ def start_workflow(workflow_id: str, trigger: str, note: str = "") -> Run:
 
 def start_agent_task(agent_id: str, title: str, prompt: str, trigger: str = "manual") -> Run:
     return _launch(Run("task", title, [agent_id], prompt, trigger, None))
+
+
+def start_revision(item: dict[str, Any], steps: list[str], prompt: str) -> Run:
+    run = Run("task", f"Revizyon: {item['title']}", steps, prompt, "manual", None)
+    run.revision_of = item["id"]
+    return _launch(run)
 
 
 # ---------------------------------------------------------------- zamanlayıcı
