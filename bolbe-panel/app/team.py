@@ -40,7 +40,9 @@ COMMON_RULES = """Genel kurallar:
 - Uydurma veri kullanma. Bir sayıyı bir kaynaktan (Virale, web araması, yüklenen dosya) almadıysan "tahmin" diye işaretle.
 - Önceki adımların çıktıları sana verilir; onların üzerine inşa et, tekrar etme.
 - İşin bitince son mesajında kısa bir özet ver: ne yaptın, ne ürettin, sırada ne var.
-- Bir aracın hatası işi durduruyorsa nedenini açıkça yaz ve elindekiyle devam et."""
+- Bir aracın hatası işi durduruyorsa nedenini açıkça yaz ve elindekiyle devam et.
+- Virale ve panel araçlarını her zaman doğrudan araç olarak çağır. Web aramasının kod (Python) ortamından çağırmaya çalışma; orada tanımlı değiller.
+- Hataları ve veri sınırlarını ayrı dosya olarak kaydetme; raporunun sonundaki "Veri sınırları" bölümüne yaz."""
 
 # ---------------------------------------------------------------- takımlar ve ajanlar
 
