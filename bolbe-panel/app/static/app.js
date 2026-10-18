@@ -520,7 +520,7 @@ function pageReports() {
     <div class="page-head"><div><h1 class="page-title">Raporlar</h1>
       <p class="page-desc">Rakip raporları, içerik takvimleri, strateji planları ve video özetleri.</p></div></div>
     <div class="reports-layout">
-      <div class="card"><input type="search" id="r-filter" placeholder="Rapor ara…" style="margin-bottom:8px"><div class="report-list" id="report-list"></div></div>
+      <div class="card report-list-card"><input type="search" id="r-filter" placeholder="Rapor ara…" style="margin-bottom:8px"><div class="report-list" id="report-list"></div></div>
       <div class="card report-view" id="report-view"><div class="empty">Okumak için bir rapor seçin</div></div>
     </div>`;
   let reports = [];
@@ -535,7 +535,8 @@ function pageReports() {
   const open = async (name) => {
     const box = $("#report-view");
     const r = reports.find((x) => x.name === name) || { kind: /\.(md|txt|csv|json)$/i.test(name) ? "text" : "other" };
-    const bar = `<div class="report-toolbar"><a class="btn btn-sm" href="${fileUrl("reports", name, true)}">↓ İndir</a></div>`;
+    $(".reports-layout").classList.add("has-report");
+    const bar = `<div class="report-toolbar"><button type="button" class="btn btn-sm only-mobile" data-back>← Raporlar</button><a class="btn btn-sm" href="${fileUrl("reports", name, true)}">↓ İndir</a></div>`;
     if (r.kind === "pdf") { box.innerHTML = bar + `<iframe src="${fileUrl("reports", name)}" style="width:100%;height:75vh;border:0;border-radius:10px"></iframe>`; return; }
     if (r.kind === "image") { box.innerHTML = bar + `<img src="${fileUrl("reports", name)}" style="max-width:100%;border-radius:10px">`; return; }
     if (r.kind !== "text" || /\.html?$/i.test(name)) { box.innerHTML = bar + `<div class="empty">Bu dosya türü panelde önizlenemiyor. İndirip açabilirsiniz.</div>`; return; }
@@ -543,10 +544,17 @@ function pageReports() {
     try {
       const text = await api(fileUrl("reports", name));
       box.innerHTML = bar + (/\.md$/i.test(name) ? `<article class="markdown">${renderMarkdown(text)}</article>` : `<pre class="markdown">${esc(text)}</pre>`);
-      if (innerWidth < 1180) box.scrollIntoView({ behavior: "smooth" });
+      if (innerWidth < 1180) window.scrollTo({ top: 0 });
     } catch (ex) { box.innerHTML = `<div class="empty">${esc(ex.message)}</div>`; }
   };
   $("#r-filter").addEventListener("input", drawList);
+  $("#report-view").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-back]")) return;
+    history.replaceState(null, "", "#/raporlar");
+    $(".reports-layout").classList.remove("has-report");
+    $("#report-view").innerHTML = `<div class="empty">Okumak için bir rapor seçin</div>`;
+    drawList();
+  });
   $("#report-list").addEventListener("click", (e) => {
     const name = e.target.closest("[data-r]")?.dataset.r; if (!name) return;
     history.replaceState(null, "", `#/raporlar?r=${encodeURIComponent(name)}`);
