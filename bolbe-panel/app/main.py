@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import runner, storage
+from . import convert, runner, storage
 from .team import AGENTS, REVISION_ROUTES, WORKFLOW_BY_ID, WORKFLOWS, public_management_view, public_team_view
 
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
@@ -200,6 +200,12 @@ async def upload_files(area: str, files: list[UploadFile] = File(...), note: str
         await _set_file_notes([s["name"] for s in saved], note, team)
     await storage.log_activity(f"{len(saved)} dosya yüklendi ({area}): " + ", ".join(s["name"] for s in saved), "upload")
     return saved
+
+
+@app.get("/api/files/{area}/{name}/markdown", dependencies=auth)
+async def file_markdown(area: str, name: str) -> dict[str, Any]:
+    """Dosyanın ajanların okuduğu Markdown hâli (PDF, Word, Excel, PowerPoint dönüştürülür)."""
+    return {"name": name, "markdown": await asyncio.to_thread(convert.to_markdown, area, name, 200_000)}
 
 
 @app.get("/api/files/{area}/{name}", dependencies=auth)
@@ -554,7 +560,8 @@ async def get_settings() -> dict[str, Any]:
                               for mid, m in runner.MODELS.items()],
             "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
             "budget": {"spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
-            "limits": {"generations_per_run": runner.MAX_GENERATIONS_PER_RUN, "turns": runner.MAX_TURNS}}
+            "limits": {"generations_per_run": runner.MAX_GENERATIONS_PER_RUN, "turns": runner.MAX_TURNS},
+            "version": BUILD_VERSION}
 
 
 @app.put("/api/settings", dependencies=auth)
@@ -606,6 +613,30 @@ async def service_worker() -> FileResponse:
     return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript")
 
 
+def _build_version() -> str:
+    sha = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:7]
+    if sha:
+        return sha
+    latest = max(p.stat().st_mtime for p in STATIC_DIR.rglob("*") if p.is_file())
+    return hashlib.sha1(str(latest).encode()).hexdigest()[:7]
+
+
+BUILD_VERSION = _build_version()
+
+
+@app.middleware("http")
+async def no_stale_assets(request: Request, call_next):  # type: ignore[no-untyped-def]
+    # Tarayıcı eski arayüz dosyalarını önbellekten kullanmasın; her yüklemede ETag ile doğrulanır.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path in ("/sw.js", "/manifest.webmanifest"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+async def index() -> Response:
+    # Sürüm etiketi değişince tarayıcı arayüz dosyalarını yeni adresten ister.
+    html = (STATIC_DIR / "index.html").read_text("utf-8")
+    for asset in ("/static/app.js", "/static/app.css"):
+        html = html.replace(f'"{asset}"', f'"{asset}?v={BUILD_VERSION}"')
+    return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})

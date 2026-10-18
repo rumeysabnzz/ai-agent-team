@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import httpx
 
-from . import storage
+from . import convert, storage
 from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, TEAMS, WORKFLOW_BY_ID, WORKFLOWS
 
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
@@ -178,7 +178,9 @@ CUSTOM_TOOLS: dict[str, dict[str, Any]] = {
                          "properties": {"area": {"type": "string", "enum": ["uploads", "reports", "media"]}}},
     },
     "read_file": {
-        "description": "uploads veya reports alanındaki bir metin dosyasını (md, txt, csv, json) okur. Dosya adını list_files çıktısından birebir kullan.",
+        "description": "uploads veya reports alanındaki bir dosyayı Markdown metni olarak okur: md, txt, csv, json ve ayrıca PDF, Word (.docx), "
+                       "Excel (.xlsx, tüm sayfalar tablo olarak) ve PowerPoint (.pptx) otomatik dönüştürülür. Görseller için view_image kullan. "
+                       "Dosya adını list_files çıktısından birebir kullan.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["area", "name"],
                          "properties": {"area": {"type": "string", "enum": ["uploads", "reports"]},
                                         "name": {"type": "string"}}},
@@ -351,9 +353,9 @@ def search_archive(query: str, limit: int = 8) -> list[dict[str, Any]]:
     for area in ("reports", "uploads"):
         for f in storage.list_area(area)[:80]:
             text = ""
-            if f["kind"] == "text":
+            if Path(f["name"]).suffix.lower() in storage.TEXT_EXT | convert.CONVERTIBLE:
                 try:
-                    text = storage.read_text_file(area, f["name"], 40_000)
+                    text = convert.to_markdown(area, f["name"], 40_000)
                 except Exception:  # noqa: BLE001 — okunamayan dosya atlanır
                     text = ""
             note = notes.get(f["name"], {}).get("note", "") if area == "uploads" else ""
@@ -512,7 +514,7 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         items = storage.list_area(args["area"])[:60]
         return json.dumps([{k: f[k] for k in ("name", "kind", "size", "modified")} for f in items], ensure_ascii=False) or "[]"
     if name == "read_file":
-        return storage.read_text_file(args["area"], args["name"])
+        return convert.to_markdown(args["area"], args["name"])
     if name == "save_report":
         stamp = datetime.now(TZ).strftime("%Y-%m-%d-%H%M")
         path = storage.unique_path("reports", f"{stamp}-{storage.slug(args['title'])}.md")

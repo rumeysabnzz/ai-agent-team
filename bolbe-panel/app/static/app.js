@@ -685,6 +685,30 @@ function openLightbox(name, kind, onDelete) {
 
 /* ------------------------------------------------------------ dosyalar */
 
+const MD_EXT = /\.(pdf|docx|xlsx|xlsm|pptx|md|txt|csv|json|tsv|xml|ya?ml)$/i;
+
+async function openMarkdown(area, name) {
+  const lb = $("#lightbox");
+  lb.innerHTML = `<div class="lb-bar"><span class="lb-title">${esc(name)} · ajanların okuduğu metin</span>
+      <button class="btn btn-sm" id="md-dl" disabled>↓ .md indir</button><button class="btn btn-sm" id="lb-close" aria-label="Kapat">✕</button></div>
+    <div class="lb-body md-body"><div class="md-sheet"><span class="spinner"></span> Dönüştürülüyor…</div></div>`;
+  lb.hidden = false;
+  const close = () => { lb.hidden = true; lb.innerHTML = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => e.key === "Escape" && close();
+  document.addEventListener("keydown", onKey);
+  $("#lb-close").onclick = close;
+  try {
+    const r = await api(`/api/files/${area}/${encodeURIComponent(name)}/markdown`);
+    $(".md-sheet", lb).innerHTML = `<article class="markdown">${renderMarkdown(r.markdown)}</article>`;
+    const btn = $("#md-dl"); btn.disabled = false;
+    btn.onclick = () => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([r.markdown], { type: "text/markdown" }));
+      a.download = name.replace(/\.[^.]+$/, "") + ".md"; a.click(); URL.revokeObjectURL(a.href);
+    };
+  } catch (ex) { $(".md-sheet", lb).innerHTML = `<div class="empty">${esc(ex.message)}</div>`; }
+}
+
 function pageFiles() {
   let area = "uploads";
   view.innerHTML = `
@@ -715,7 +739,7 @@ function pageFiles() {
       <div class="file-row"><div class="file-ico">${KIND_ICON[f.kind]}</div>
         <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${fmtSize(f.size)} · ${fmtDate(f.modified)}${area === "uploads" ? ` · ${f.team && f.team !== "genel" ? esc(state.teams.find((t) => t.id === f.team)?.name || f.team) : "tüm ekip"}` : ""}</div>
           ${f.note ? `<div class="file-note">📝 ${esc(f.note)}</div>` : ""}</div>
-        <div class="row-actions">${area === "uploads" ? `<button class="btn btn-sm" data-note="${esc(f.name)}" title="Ajanlara not">✎</button>` : ""}<a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
+        <div class="row-actions">${MD_EXT.test(f.name) ? `<button class="btn btn-sm" data-md="${esc(f.name)}" title="Ajanların okuduğu metin (Markdown)">MD</button>` : ""}${area === "uploads" ? `<button class="btn btn-sm" data-note="${esc(f.name)}" title="Ajanlara not">✎</button>` : ""}<a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
           <button class="btn btn-sm btn-danger" data-del="${esc(f.name)}" title="Sil">✕</button></div></div>`).join("") : `<div class="empty">Bu alanda dosya yok</div>`;
   };
   const load = async () => { items = await api(`/api/files/${area}`).catch((e) => (toast(e.message), [])); draw(); };
@@ -726,6 +750,8 @@ function pageFiles() {
   });
   $("#file-filter").addEventListener("input", draw);
   list.addEventListener("click", async (e) => {
+    const mdFor = e.target.closest("[data-md]")?.dataset.md;
+    if (mdFor) return openMarkdown(area, mdFor);
     const noteFor = e.target.closest("[data-note]")?.dataset.note;
     if (noteFor) {
       const f = items.find((x) => x.name === noteFor) || {};
@@ -835,7 +861,8 @@ function pageSettings() {
       <dt>Virale (ChatPlace)</dt><dd>${s.integrations.virale ? chip("Bağlı", "green") : chip("VIRALE_MCP_URL yok", "orange")}</dd>
       <dt>Bu ay harcanan</dt><dd>${fmtUsd(s.budget.spent)} / ${fmtUsd(s.budget.limit)}<div class="budget-bar"><span style="width:${pct}%"></span></div></dd>
       <dt>Üretim sınırı</dt><dd>Çalıştırma başına ${s.limits.generations_per_run} görsel/video</dd>
-      <dt>Tur sınırı</dt><dd>Ajan başına ${s.limits.turns} tur</dd>`;
+      <dt>Tur sınırı</dt><dd>Ajan başına ${s.limits.turns} tur</dd>
+      <dt>Panel sürümü</dt><dd>${esc(s.version)}</dd>`;
   }).catch((e) => toast(e.message));
   $("#add-comp").addEventListener("click", () => $("#s-comps").insertAdjacentHTML("beforeend", compRow()));
   $("#s-comps").addEventListener("click", (e) => e.target.closest("[data-rm]")?.parentElement.remove());
