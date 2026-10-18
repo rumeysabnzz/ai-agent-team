@@ -402,6 +402,40 @@ pre.markdown{white-space:pre-wrap}
 @media (max-width:1180px){.cal-layout{grid-template-columns:1fr}.org-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:720px){.cal-day{min-height:52px;padding:4px}.cal-sum{display:none}.cal-num{font-size:.85rem}}
 
+/* ---------- içerik geçmişi ---------- */
+.ap-title{color:inherit;text-decoration:none}
+.ap-title:hover{text-decoration:underline}
+.hv-timeline{max-width:860px;margin:0 auto}
+.hv-ver{display:flex;flex-direction:column;gap:10px}
+.hv-ver.current{border:2px solid var(--brand)}
+.hv-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.88rem}
+.hv-state{margin-left:auto}
+.hv-run{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:.88rem;color:var(--text);text-decoration:none;background:var(--surface-2);padding:8px 10px;border-radius:10px}
+.hv-nomedia{font-size:.85rem}
+.hv-body summary{cursor:pointer;font-weight:650;font-size:.9rem}
+.hv-body .markdown{margin-top:8px}
+.hv-decision{background:var(--purple-bg);color:var(--text);padding:8px 12px;border-radius:10px;font-size:.9rem}
+.hv-next{border-top:1px dashed var(--line-strong);padding-top:10px;font-size:.88rem}
+.hv-next.bad .hv-run{background:var(--red-bg)}
+.hv-err{color:var(--red);margin-top:6px;font-size:.86rem}
+.hv-arrow{text-align:center;font-size:1.4rem;color:var(--brand);margin:6px 0}
+
+/* ---------- açılır takvim ve dosya notları ---------- */
+.cal-wrap{position:relative;margin-left:auto}
+.cal-btn{font-size:1.1rem;color:var(--brand)}
+.cal-pop{position:absolute;right:0;top:46px;width:300px;z-index:50;padding:12px;box-shadow:var(--shadow-lift)}
+.pc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.pc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.pc-wd span{text-align:center;font-size:.75rem;color:var(--muted);font-weight:650}
+.pc-day{position:relative;aspect-ratio:1;border:0;border-radius:8px;background:transparent;cursor:pointer;font:inherit;font-size:.88rem;color:var(--text)}
+.pc-day:hover{background:var(--surface-2)}
+.pc-day.has{background:var(--brand-soft);font-weight:750}
+.pc-day.today{outline:2px solid var(--brand)}
+.pc-day i{position:absolute;left:50%;bottom:3px;width:5px;height:5px;border-radius:50%;background:var(--brand);transform:translateX(-50%)}
+.pc-foot{font-size:.78rem;margin-top:8px;text-align:center}
+.up-meta{display:grid;grid-template-columns:minmax(160px,220px) 1fr;gap:8px;margin-top:12px}
+.file-note{font-size:.84rem;color:var(--text);background:var(--surface-2);border-radius:8px;padding:4px 8px;margin-top:4px}
+
 /* ---------- dar ekranlar ---------- */
 @media (max-width:1180px){
   .hub-area{height:auto;display:flex;flex-direction:column;gap:14px}
@@ -422,7 +456,8 @@ pre.markdown{white-space:pre-wrap}
   .nav .nav-desk{display:none}
   .nav-more{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:0.8rem;padding:6px 10px}
   .nav-ico{font-size:1.2rem}
-  .theme-btn{margin-left:auto}
+  .cal-pop{position:fixed;left:12px;right:12px;top:64px;width:auto}
+  .up-meta{grid-template-columns:1fr}
   #logout{display:none}
   .toast{bottom:calc(var(--nav-h) + 16px + env(safe-area-inset-bottom))}
   .hero .brand-mark{font-size:1.9rem}

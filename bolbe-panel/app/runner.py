@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import ipaddress
 import json
 import mimetypes
@@ -238,7 +239,30 @@ CUSTOM_TOOLS.update({
                          "properties": {"days": {"type": "integer"}}},
     },
 })
-BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson"]
+CUSTOM_TOOLS.update({
+    "wait": {
+        "description": "Belirtilen süre (10–120 sn) bekler. Virale üretimleri (özellikle video, 2–4 dk) bitmeden önce durumu art arda "
+                       "sorgulama; her virale_generation_status kontrolünden önce wait ile 30–60 sn bekle.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["seconds"],
+                         "properties": {"seconds": {"type": "integer"}}},
+    },
+    "view_image": {
+        "description": "uploads veya media alanındaki bir görseli (jpg, png, webp, gif) görmeni sağlar. Kurucunun yüklediği ürün/marka "
+                       "görsellerini ve daha önce üretilen görselleri incelemek için kullan.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["area", "name"],
+                         "properties": {"area": {"type": "string", "enum": ["uploads", "media"]}, "name": {"type": "string"}}},
+    },
+    "search_archive": {
+        "description": "Ekibin tüm geçmişinde arama yapar: kaydedilmiş raporlar, Kurucunun yüklediği metin dosyaları ve dosya notları, "
+                       "geçmiş görevler ve Kurucunun talimatları, ajanların geçmiş çıktıları, onaya gönderilen içerikler ve notları, bilgi bankası. "
+                       "Yeni bir işe başlamadan önce ilgili eski araştırmaları ve kararları bulmak için kullan.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["query"],
+                         "properties": {"query": {"type": "string"}}},
+    },
+})
+BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson", "view_image", "search_archive"]
+IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
+MAX_IMAGE_BYTES = 3_500_000
 MANAGER_TOOLS = ["list_lessons", "remove_lesson", "add_knowledge", "team_activity"]
 MAX_LESSONS = 25
 
@@ -308,6 +332,87 @@ def _can_coach(agent: dict[str, Any], target: str) -> bool:
     return target == agent["id"]
 
 
+def _fold(text: str) -> str:
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
+def file_notes() -> dict[str, dict[str, Any]]:
+    return storage.read_state("file_notes", {})
+
+
+def _recent_runs(limit: int = 40) -> list[dict[str, Any]]:
+    return [r for r in (load_run(x["id"]) for x in storage.read_state("runs_index", [])[:limit]) if r]
+
+
+def search_archive(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    terms = [t for t in _fold(query).split() if len(t) > 2] or [_fold(query).strip()]
+    docs: list[tuple[str, str]] = []
+    notes = file_notes()
+    for area in ("reports", "uploads"):
+        for f in storage.list_area(area)[:80]:
+            text = ""
+            if f["kind"] == "text":
+                try:
+                    text = storage.read_text_file(area, f["name"], 40_000)
+                except Exception:  # noqa: BLE001 — okunamayan dosya atlanır
+                    text = ""
+            note = notes.get(f["name"], {}).get("note", "") if area == "uploads" else ""
+            docs.append((f"{'rapor' if area == 'reports' else 'yüklenen dosya'}: {f['name']} ({_local_day(f['modified'])})",
+                         f"{f['name']}\n{note}\n{text}"))
+    for r in _recent_runs(60):
+        docs.append((f"görev/talimat: {r['title']} ({_local_day(r['created'])})", r.get("brief", "")))
+        for st in r.get("step_results", []):
+            docs.append((f"{st['agent_name']} çıktısı: {r['title']} ({_local_day(r['created'])})", st.get("text", "")))
+    for a in storage.read_state("approvals", [])[:200]:
+        docs.append((f"onay içeriği ({a['status']}): {a['title']} ({_local_day(a['created'])})",
+                     f"{a['title']}\n{a['body']}\nKurucu notu: {a.get('note', '')}"))
+    for team, items in storage.read_state("knowledge", {}).items():
+        for n in items:
+            docs.append((f"bilgi notu: {n['title']}", f"{n['title']}\n{n['text']}\n{n['source_url']}"))
+    hits = []
+    for ref, text in docs:
+        folded = _fold(text)
+        score = sum(folded.count(t) for t in terms)
+        if not score:
+            continue
+        pos = min((folded.find(t) for t in terms if t in folded), default=0)
+        snippet = text[max(0, pos - 200): pos + 500].replace("\n", " ").strip()
+        hits.append({"kaynak": ref, "puan": score, "alinti": snippet})
+    hits.sort(key=lambda h: h["puan"], reverse=True)
+    return hits[:limit]
+
+
+def _archive_prompt(agent: dict[str, Any]) -> str:
+    """Ajanın her çalışmada gördüğü arşiv özeti: Kurucunun dosyaları ve talimatları, kendi geçmiş işleri, son raporlar."""
+    parts = []
+    notes = file_notes()
+    uploads = [f for f in storage.list_area("uploads")
+               if notes.get(f["name"], {}).get("team", "genel") in ("genel", agent["team"]) or agent.get("controller")][:15]
+    if uploads:
+        parts.append("## Kurucunun yüklediği dosyalar (read_file / view_image ile aç)\n" + "\n".join(
+            f"- {f['name']} ({f['kind']}, {_local_day(f['modified'])})"
+            + (f": {notes[f['name']]['note']}" if notes.get(f["name"], {}).get("note") else "") for f in uploads))
+    runs = _recent_runs(30)
+    mine = []
+    for r in runs:
+        for st in r.get("step_results", []):
+            if st["agent"] == agent["id"] and len(mine) < 3:
+                mine.append(f"- {_local_day(r['created'])} · {r['title']}: {st['text'][:600]}")
+    if mine:
+        parts.append("## Senin son işlerin (tekrar etme, üzerine inşa et)\n" + "\n".join(mine))
+    orders = [f"- {_local_day(r['created'])} · {r['title']}: {r.get('brief', '')[:400]}"
+              for r in runs if r["kind"] == "task" or "Kullanıcı notu:" in r.get("brief", "")][:6]
+    orders += [f"- {_local_day(a['decided'])} · {a['title']} ({a['status']}): {a['note'][:300]}"
+               for a in storage.read_state("approvals", []) if a.get("note") and a.get("decided")][:6]
+    if orders:
+        parts.append("## Kurucunun son talimatları ve notları\n" + "\n".join(orders))
+    reports = storage.list_area("reports")[:8]
+    if reports:
+        parts.append("## Son raporlar (read_file ile oku)\n" + "\n".join(f"- {f['name']}" for f in reports))
+    parts.append("Daha eski araştırma, karar ve çıktılar için search_archive aracını kullan.")
+    return "\n\n".join(parts)[:9000]
+
+
 def _local_day(iso: str) -> str:
     try:
         return datetime.fromisoformat(iso).astimezone(TZ).strftime("%Y-%m-%d")
@@ -348,6 +453,8 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
         names.append("raise_alert")
     if agent.get("manager"):
         names += MANAGER_TOOLS
+    if "virale_generation_status" in agent.get("virale", []):
+        names.append("wait")
     return names
 
 
@@ -438,6 +545,24 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         bus.publish({"type": "approval", "item": {k: item[k] for k in ("id", "kind", "title", "agent_name")}})
         missing = set(args.get("media", [])) - set(media)
         return f"Onaya gönderildi (kimlik {item['id']})." + (f" Bulunamayan medya: {', '.join(missing)}" if missing else "")
+    if name == "wait":
+        seconds = max(10, min(int(args["seconds"]), 120))
+        run.emit("agent_note", agent=agent["id"], text=f"Üretimin bitmesi için {seconds} sn bekliyor")
+        await asyncio.sleep(seconds)
+        return f"{seconds} sn beklendi. Şimdi durumu kontrol et."
+    if name == "view_image":
+        path = storage.area_file(args["area"], args["name"])
+        media_type = IMAGE_TYPES.get(path.suffix.lower())
+        if not media_type:
+            raise ValueError("Yalnız jpg, png, webp, gif görseller açılabilir")
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            raise ValueError("Görsel çok büyük (3,5 MB sınırı)")
+        data = base64.b64encode(path.read_bytes()).decode()
+        return [{"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}},
+                {"type": "text", "text": f"{args['area']}/{path.name}"}]
+    if name == "search_archive":
+        hits = search_archive(args["query"])
+        return json.dumps(hits, ensure_ascii=False) if hits else "Arşivde eşleşme bulunamadı."
     if name == "add_lesson":
         if not _can_coach(agent, args["agent_id"]):
             raise ValueError(f"{args['agent_id']} için ders ekleme yetkin yok")
@@ -552,6 +677,7 @@ def _memory_prompt(agent: dict[str, Any]) -> str:
         parts.append("## Takım bilgi bankası (dış kaynaklı notlar)\n"
                      + "\n".join(f"- **{n['title']}**: {n['text']}" + (f" [{n['source_url']}]" if n["source_url"] else "")
                                   for n in notes)[:4000])
+    parts.append(_archive_prompt(agent))
     parts.append("İşin sonunda, gelecekte işine yarayacak yeni bir ders çıkardıysan add_lesson ile kendi hafızana en fazla 1 kısa ders ekle.")
     return "\n\n".join(parts)
 

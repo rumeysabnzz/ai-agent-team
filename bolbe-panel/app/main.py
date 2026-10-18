@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -182,14 +182,22 @@ async def stream(request: Request) -> StreamingResponse:
 async def files(area: str) -> list[dict[str, Any]]:
     if area not in storage.AREAS:
         raise HTTPException(404, "Alan bulunamadı")
-    return storage.list_area(area)
+    items = storage.list_area(area)
+    if area == "uploads":
+        notes = runner.file_notes()
+        for f in items:
+            f.update(notes.get(f["name"], {}))
+    return items
 
 
 @app.post("/api/files/{area}", dependencies=auth)
-async def upload_files(area: str, files: list[UploadFile] = File(...)) -> list[dict[str, Any]]:
+async def upload_files(area: str, files: list[UploadFile] = File(...), note: str = Form(""),
+                       team: str = Form("genel")) -> list[dict[str, Any]]:
     if area not in storage.AREAS:
         raise HTTPException(404, "Alan bulunamadı")
     saved = [storage.file_info(area, await storage.save_upload(area, f)) for f in files]
+    if area == "uploads" and (note.strip() or team != "genel"):
+        await _set_file_notes([s["name"] for s in saved], note, team)
     await storage.log_activity(f"{len(saved)} dosya yüklendi ({area}): " + ", ".join(s["name"] for s in saved), "upload")
     return saved
 
@@ -200,6 +208,31 @@ async def get_file(area: str, name: str, download: bool = False) -> FileResponse
     # HTML ve SVG panel kökeninde çalıştırılmaz; her zaman indirme olarak verilir
     as_attachment = download or path.suffix.lower() in {".html", ".htm", ".svg"}
     return FileResponse(path, filename=path.name, content_disposition_type="attachment" if as_attachment else "inline")
+
+
+TEAM_IDS = {"genel", "takim-1", "takim-2", "takim-3", "takim-4"}
+
+
+async def _set_file_notes(names: list[str], note: str, team: str) -> None:
+    if team not in TEAM_IDS:
+        raise HTTPException(400, "Geçersiz takım")
+    async with storage.state_lock:
+        notes = storage.read_state("file_notes", {})
+        for name in names:
+            notes[name] = {"note": note.strip()[:1000], "team": team}
+        storage.write_state("file_notes", notes)
+
+
+class FileNoteBody(BaseModel):
+    note: str = Field("", max_length=1000)
+    team: str = "genel"
+
+
+@app.put("/api/files/uploads/{name}/note", dependencies=auth)
+async def put_file_note(name: str, body: FileNoteBody) -> dict[str, Any]:
+    storage.area_file("uploads", name)
+    await _set_file_notes([name], body.note, body.team)
+    return {"ok": True}
 
 
 @app.delete("/api/files/{area}/{name}", dependencies=auth)
@@ -312,6 +345,32 @@ async def approvals() -> list[dict[str, Any]]:
         if run:
             item["revision_status"], item["revision_error"] = run["status"], run.get("error")
     return items
+
+
+@app.get("/api/approvals/{item_id}/history", dependencies=auth)
+async def approval_history(item_id: str) -> dict[str, Any]:
+    """Bir içeriğin tüm sürüm zinciri: ilk çıktı → revizeler → son sürüm; her sürümün çalıştırması ve Kurucu notu."""
+    items = {i["id"]: i for i in storage.read_state("approvals", [])}
+    if item_id not in items:
+        raise HTTPException(404, "Kayıt bulunamadı")
+    first = items[item_id]
+    seen = {first["id"]}
+    while first.get("revision_of") in items and first["revision_of"] not in seen:
+        first = items[first["revision_of"]]
+        seen.add(first["id"])
+    chain, cur = [], first
+    while cur:
+        chain.append(cur)
+        nxt = items.get(cur.get("revised_by", ""))
+        cur = nxt if nxt and nxt["id"] not in {c["id"] for c in chain} else None
+    runs = {r["id"]: r for r in storage.read_state("runs_index", [])}
+    versions = []
+    for n, item in enumerate(chain, 1):
+        made_by, revision = runs.get(item.get("run_id", "")), runs.get(item.get("revision_run", ""))
+        versions.append({**item, "version": n,
+                         "made_by_run": {k: made_by[k] for k in ("id", "title", "status", "created", "finished", "cost", "steps")} if made_by else None,
+                         "revision_run_info": {k: revision[k] for k in ("id", "title", "status", "created", "finished", "error", "steps")} if revision else None})
+    return {"id": item_id, "title": chain[0]["title"], "versions": versions}
 
 
 @app.post("/api/approvals/{item_id}", dependencies=auth)

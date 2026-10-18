@@ -42,7 +42,8 @@ COMMON_RULES = """Genel kurallar:
 - İşin bitince son mesajında kısa bir özet ver: ne yaptın, ne ürettin, sırada ne var.
 - Bir aracın hatası işi durduruyorsa nedenini açıkça yaz ve elindekiyle devam et.
 - Virale ve panel araçlarını her zaman doğrudan araç olarak çağır. Web aramasının kod (Python) ortamından çağırmaya çalışma; orada tanımlı değiller.
-- Hataları ve veri sınırlarını ayrı dosya olarak kaydetme; raporunun sonundaki "Veri sınırları" bölümüne yaz."""
+- Hataları ve veri sınırlarını ayrı dosya olarak kaydetme; raporunun sonundaki "Veri sınırları" bölümüne yaz.
+- Kurucunun yüklediği dosyaları, görselleri ve notları, geçmiş görevleri ve eski araştırma sonuçlarını kullan: ilk mesajdaki arşiv özetine bak, gerekirse search_archive ile ara, read_file / view_image ile aç. Yeni bir veri toplamadan önce aynı konunun arşivde olup olmadığını kontrol et."""
 
 # ---------------------------------------------------------------- takımlar ve ajanlar
 
@@ -122,7 +123,7 @@ Her içeriği numaralandır. Bu metinler Görsel Tasarımcı ve Carousel Uzmanı
                 "virale": ["virale_image_generate", "virale_generation_status", "virale_ai_balance", "virale_generation_estimate"],
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Görsel Tasarımcısısın. Copywriter'ın metinlerinden tekil görsel paylaşımları ve story görsellerini üretirsin.
-Her görsel için marka diline uygun, ayrıntılı bir üretim talimatı (prompt) yaz ve virale_image_generate ile üret (feed için 4:5, story için 9:16; provider gemini_pro). Görev kimliği dönünce virale_generation_status ile tamamlanana kadar kontrol et.
+Her görsel için marka diline uygun, ayrıntılı bir üretim talimatı (prompt) yaz ve virale_image_generate ile üret (feed için 4:5, story için 9:16; provider gemini_pro). Görev kimliği dönünce wait ile 20–30 sn bekleyip virale_generation_status ile tamamlanana kadar kontrol et.
 Tamamlanan her görseli save_media_from_url ile panele kaydet, ardından submit_for_approval ile onaya gönder (tür: görsel veya story; caption ve hashtag'leri gövdeye ekle).
 Üretim limiti dolarsa veya bakiye yetmezse kalan görseller için talimatları onaya "üretilmedi" notuyla gönder.""",
             },
@@ -131,7 +132,7 @@ Tamamlanan her görseli save_media_from_url ile panele kaydet, ardından submit_
                 "virale": ["virale_carousel_generate", "virale_generation_status", "virale_ai_balance", "virale_generation_estimate"],
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Carousel Uzmanısın. Takvimdeki carousel içeriklerini Copywriter'ın slayt metinleriyle üretirsin.
-virale_carousel_generate kullan: language "tr", aspectRatio "4:5", type "lite", designStyle "elegant" veya "minimal", providedSlides ile Copywriter'ın başlık/gövde metinlerini birebir ver, targetAudience ve ctaText doldur. virale_generation_status ile tamamlanmasını bekle.
+virale_carousel_generate kullan: language "tr", aspectRatio "4:5", type "lite", designStyle "elegant" veya "minimal", providedSlides ile Copywriter'ın başlık/gövde metinlerini birebir ver, targetAudience ve ctaText doldur. wait ile 30 sn bekleyerek virale_generation_status ile tamamlanmasını izle.
 Her slayt görselini sırayla save_media_from_url ile kaydet (dosya adı: carousel-konu-01.png ...), sonra tüm slaytları tek bir submit_for_approval kaydında (tür: carousel) caption ve hashtag'lerle onaya gönder.""",
             },
         ],
@@ -153,7 +154,7 @@ Sahne tariflerini bir AI video modeline verilecek kadar somut yaz (kamera hareke
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Video Üreticisisin. Senaryo Yazarının her videosunu virale_video_generate ile üretirsin: aspectRatio "9:16", senaryodaki süre (provider byteplus_seedance_fast varsayılan; 15 sn üstü için byteplus_seedance_25), quality 720p veya 1080p.
 Prompt'u senaryonun sahne tariflerinden yaz; marka renklerini ve ürün görünümünü koru, ekrana yazı yazdırmaya çalışma (metinler kurguda eklenecek).
-virale_generation_status ile her görevi tamamlanana kadar izle. Her videoyu save_media_from_url ile kaydet (dosya adı: reel-konu.mp4 / story-konu.mp4).
+Video üretimi genelde 2–4 dakika sürer: her virale_generation_status kontrolünden önce wait aracıyla 45 sn bekle, durumu art arda sorgulama; tamamlanana kadar (en fazla 10 kontrol) izle. Her videoyu save_media_from_url ile kaydet (dosya adı: reel-konu.mp4 / story-konu.mp4).
 Bakiye veya limit yetmezse üretemediklerini açıkça listele.""",
             },
             {

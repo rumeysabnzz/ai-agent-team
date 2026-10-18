@@ -14,6 +14,8 @@ BOLBÉ Skincare'in 4 takım, 12 ajandan oluşan AI pazarlama ekibi ve ekibi canl
 
 **Yönetim yapısı:** Her takımın bir yöneticisi var. Yönetici takımının çalışmalarını, hatalarını, maliyetini ve Kurucunun onay/revize/ret notlarını inceler; ajanlarının hafızasına ders yazar, gerekirse web'den kaynaklı bilgi notu ekler ve Ana Kontrolcüye rapor verir. Ana Kontrolcü takımlar arası zinciri ve bütçeyi kontrol eder, "Haftalık Yönetim Raporu"nu kaydeder ve Kurucuya yalnız karar gerektiren konuları iletir.
 
+**Arşiv kullanımı:** Ajanlar her çalışmada şunları görür: Kurucunun yüklediği dosyalar ve notları, kendi son işleri, Kurucunun son talimatları ve son raporlar. `search_archive` aracıyla tüm geçmişte (raporlar, yüklenen dosyalar, geçmiş görev ve çıktılar, onay içerikleri, bilgi bankası) arama yapar. `view_image` ile yüklenen ve üretilen görselleri inceler. Dosyalar sayfasında yüklenen her dosyaya "ajanlara not" ve hangi takımın kullanacağı eklenebilir.
+
 **Ajan gelişimi:** Her ajanın kalıcı bir hafızası (en fazla 25 ders) ve takımının bilgi bankası var; ajan her çalışmada bunları okur. Dersler dört kaynaktan gelir: Kurucunun onay/revize/ret notları, yöneticinin koçluğu, ajanın kendi değerlendirmesi ve panelden elle eklenenler.
 
 Takip edilen rakipler (Ayarlar'dan değiştirilebilir): The Purest Solutions, The Ordinary, Cream Co.
@@ -28,7 +30,8 @@ Ajan talimatları `app/team.py` dosyasında. Marka profili ve rakip listesi pane
 | **Akışlar** | 5 iş akışı: otomatik çalışmayı aç/kapat, not ekleyip hemen çalıştır, tek bir ajana serbest görev ver, çalıştırma geçmişi |
 | **Çalıştırma** | Bir çalıştırmanın adım adım canlı zaman çizelgesi, maliyeti ve çıktıları |
 | **Onay** | Üretilen görsel, carousel, reel, story ve metinler: önizle, metni kopyala, onayla, revize iste, reddet. Revize, içeriği üreten ajana gider (video için Video Üretici → Video Editör); kart revizenin durumunu ve yeni sürümü gösterir |
-| **Takvim** | Bir güne dokununca o gün yapılan çalıştırmalar, raporlar, görsel/videolar, onaylar, uyarılar ve aktivite |
+| **İçerik geçmişi** | Onay kartındaki "Geçmiş" veya başlık: ilk çıktı, nasıl başladığı, Kurucu kararları ve tüm revize sürümleri sırayla |
+| **Takvim** | Üst çubuktaki ▦ düğmesiyle açılan takvimden veya Takvim sayfasından gün seçilir; bir güne dokununca o gün yapılan çalıştırmalar, raporlar, görsel/videolar, onaylar, uyarılar ve aktivite |
 | **Gelişim** | Yönetim yapısı, yönetim raporları, ajan hafızaları (ders ekle/sil) ve bilgi bankası (kaynaklı not ekle/sil) |
 | **Raporlar** | Rakip raporları, içerik takvimleri, strateji planları |
 | **Galeri / Dosyalar** | Üretilen medya; ekibin kullanacağı veriler (Insights dışa aktarımı, ürün bilgileri, brief) |

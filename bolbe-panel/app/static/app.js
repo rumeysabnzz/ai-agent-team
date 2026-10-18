@@ -99,6 +99,46 @@ $("#theme-toggle").addEventListener("click", toggleTheme);
 $("#theme-m").addEventListener("click", toggleTheme);
 syncThemeButtons();
 $("#nav-more").addEventListener("click", () => ($("#more-sheet").hidden = false));
+
+/* ------------------------------------------------------------ açılır takvim */
+
+let popMonth = "";
+async function drawPopCal() {
+  const box = $("#cal-pop");
+  const data = await api(`/api/calendar?month=${popMonth}`).catch(() => null);
+  if (!data) return;
+  popMonth = data.month;
+  const [y, m] = popMonth.split("-").map(Number);
+  const first = (new Date(y, m - 1, 1).getDay() + 6) % 7, total = new Date(y, m, 0).getDate();
+  let cells = "<span></span>".repeat(first);
+  for (let d = 1; d <= total; d++) {
+    const key = `${popMonth}-${String(d).padStart(2, "0")}`, c = data.days[key] || {};
+    const n = Object.values(c).reduce((a, b) => a + b, 0);
+    cells += `<button class="pc-day ${key === data.today ? "today" : ""} ${n ? "has" : ""}" data-day="${key}" title="${n ? `${n} kayıt` : "kayıt yok"}">${d}${n ? "<i></i>" : ""}</button>`;
+  }
+  box.innerHTML = `<div class="pc-head"><button class="btn btn-sm" data-pc="-1" aria-label="Önceki ay">‹</button><b>${MONTHS[m - 1]} ${y}</b><button class="btn btn-sm" data-pc="1" aria-label="Sonraki ay">›</button></div>
+    <div class="pc-grid pc-wd">${["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pa"].map((x) => `<span>${x}</span>`).join("")}</div>
+    <div class="pc-grid">${cells}</div><div class="pc-foot muted">Noktalı günlerde kayıt var. Güne dokunun.</div>`;
+}
+$("#cal-toggle").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const box = $("#cal-pop");
+  box.hidden = !box.hidden;
+  if (!box.hidden) { popMonth = ""; drawPopCal(); }
+});
+$("#cal-pop").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const nav = e.target.closest("[data-pc]");
+  if (nav) {
+    const [y, m] = popMonth.split("-").map(Number); const d = new Date(y, m - 1 + Number(nav.dataset.pc), 1);
+    popMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; drawPopCal(); return;
+  }
+  const day = e.target.closest("[data-day]")?.dataset.day; if (!day) return;
+  $("#cal-pop").hidden = true;
+  const target = `#/takvim?ay=${day.slice(0, 7)}&gun=${day}`;
+  if (location.hash === target) route(); else location.hash = target;
+});
+document.addEventListener("click", () => { const b = $("#cal-pop"); if (b) b.hidden = true; });
 $("#more-sheet").addEventListener("click", () => ($("#more-sheet").hidden = true));
 
 /* ------------------------------------------------------------ canlı olaylar */
@@ -161,14 +201,14 @@ async function refreshBadge() {
 /* ------------------------------------------------------------ yönlendirme */
 
 const routes = { "": pageHome, akislar: pageWorkflows, calisma: pageRun, onay: pageApprovals, raporlar: pageReports,
-  galeri: pageGallery, dosyalar: pageFiles, ayarlar: pageSettings, takvim: pageCalendar, gelisim: pageDevelopment };
+  galeri: pageGallery, dosyalar: pageFiles, ayarlar: pageSettings, takvim: pageCalendar, gelisim: pageDevelopment, icerik: pageContentHistory };
 let cleanup = null;
 const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
 
 function route() {
   const key = location.hash.replace(/^#\/?/, "").split("?")[0];
   const page = routes[key] || pageHome;
-  $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (key || "home") || (key === "calisma" && a.dataset.route === "akislar")));
+  $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (key || "home") || (key === "calisma" && a.dataset.route === "akislar") || (key === "icerik" && a.dataset.route === "onay")));
   $("#more-sheet").hidden = true;
   if (cleanup) { cleanup(); cleanup = null; }
   view.innerHTML = "";
@@ -495,7 +535,7 @@ function pageApprovals() {
     $("#ap-grid").innerHTML = shown.length ? shown.map((i) => `
       <div class="card ap-card" data-id="${i.id}">
         <div class="ap-head">${chip(i.kind, { reel: "orange", story: "purple", carousel: "cyan", "görsel": "green" }[i.kind] || "gold")}
-          <span class="muted" style="font-size:.8rem">${esc(i.agent_name)} · ${fmtDate(i.created)}</span><h3>${esc(i.title)}</h3></div>
+          <span class="muted" style="font-size:.8rem">${esc(i.agent_name)} · ${fmtDate(i.created)}</span><h3><a class="ap-title" href="#/icerik?id=${i.id}">${esc(i.title)}</a></h3></div>
         ${i.media.length ? `<div class="ap-media">${i.media.map((m) => /\.(mp4|mov|webm|m4v)$/i.test(m)
           ? `<video src="${fileUrl("media", m)}#t=0.5" preload="metadata" muted playsinline data-lb="${esc(m)}" data-k="video"></video>`
           : `<img src="${fileUrl("media", m)}" loading="lazy" alt="${esc(m)}" data-lb="${esc(m)}" data-k="image">`).join("")}</div>` : ""}
@@ -503,6 +543,7 @@ function pageApprovals() {
         ${i.note ? `<div class="ap-note">Not: ${esc(i.note)}</div>` : ""}
         ${revisionInfo(i)}
         <div class="ap-actions">
+          <a class="btn btn-sm" href="#/icerik?id=${i.id}">🕘 Geçmiş${i.revision_of || i.revised_by || i.revision_run ? " ↻" : ""}</a>
           <button class="btn btn-sm" data-copy="${i.id}">⧉ Metni kopyala</button>
           ${i.status === "pending" ? `<button class="btn btn-sm btn-green" data-act="approve">✓ Onayla</button>
           <button class="btn btn-sm" data-act="revise">↻ Revize iste</button><button class="btn btn-sm btn-danger" data-act="reject">✕ Reddet</button>` : ""}
@@ -653,6 +694,10 @@ function pageFiles() {
       <label class="dropzone" id="drop"><input type="file" id="file-input" multiple hidden>
         <div style="font-size:1.8rem">⇪</div><div><b>Dosya seçin</b> veya buraya sürükleyin</div>
         <div class="muted" style="font-size:.82rem;margin-top:4px">Excel, CSV, PDF, Word, görsel, video…</div></label>
+      <div class="up-meta">
+        <select id="up-team"><option value="genel">Tüm ekip kullansın</option>${state.teams.map((t) => `<option value="${t.id}">${t.icon} ${esc(t.name)}</option>`).join("")}</select>
+        <input type="text" id="up-note" placeholder="Ajanlara not: bu dosya nedir, nasıl kullanılsın? (ör. Ekim Insights verisi, ürün görselleri)">
+      </div>
       <div class="upload-progress" id="up-progress"></div>
     </div>
     <div class="card" style="margin-top:16px">
@@ -668,8 +713,9 @@ function pageFiles() {
     const shown = items.filter((f) => f.name.toLowerCase().includes(q));
     list.innerHTML = shown.length ? shown.map((f) => `
       <div class="file-row"><div class="file-ico">${KIND_ICON[f.kind]}</div>
-        <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${fmtSize(f.size)} · ${fmtDate(f.modified)}</div></div>
-        <div class="row-actions"><a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
+        <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${fmtSize(f.size)} · ${fmtDate(f.modified)}${area === "uploads" ? ` · ${f.team && f.team !== "genel" ? esc(state.teams.find((t) => t.id === f.team)?.name || f.team) : "tüm ekip"}` : ""}</div>
+          ${f.note ? `<div class="file-note">📝 ${esc(f.note)}</div>` : ""}</div>
+        <div class="row-actions">${area === "uploads" ? `<button class="btn btn-sm" data-note="${esc(f.name)}" title="Ajanlara not">✎</button>` : ""}<a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
           <button class="btn btn-sm btn-danger" data-del="${esc(f.name)}" title="Sil">✕</button></div></div>`).join("") : `<div class="empty">Bu alanda dosya yok</div>`;
   };
   const load = async () => { items = await api(`/api/files/${area}`).catch((e) => (toast(e.message), [])); draw(); };
@@ -680,6 +726,14 @@ function pageFiles() {
   });
   $("#file-filter").addEventListener("input", draw);
   list.addEventListener("click", async (e) => {
+    const noteFor = e.target.closest("[data-note]")?.dataset.note;
+    if (noteFor) {
+      const f = items.find((x) => x.name === noteFor) || {};
+      const note = prompt("Ajanlar bu dosyayı nasıl kullansın?", f.note || "");
+      if (note === null) return;
+      try { await sendJSON("PUT", `/api/files/uploads/${encodeURIComponent(noteFor)}/note`, { note, team: f.team || "genel" }); toast("Not kaydedildi"); load(); } catch (ex) { toast(ex.message); }
+      return;
+    }
     const name = e.target.closest("[data-del]")?.dataset.del; if (!name) return;
     if (!confirm(`"${name}" silinsin mi? Bu işlem geri alınamaz.`)) return;
     try { await api(fileUrl(area, name), { method: "DELETE" }); toast("Dosya silindi"); load(); } catch (ex) { toast(ex.message); }
@@ -700,6 +754,7 @@ function uploadFiles(area, fileList, progressBox, done) {
     progressBox.prepend(row);
     const fd = new FormData();
     fd.append("files", file);
+    if ($("#up-note")) { fd.append("note", $("#up-note").value); fd.append("team", $("#up-team").value); }
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/files/${area}`);
     xhr.upload.onprogress = (e) => {
@@ -789,6 +844,46 @@ function pageSettings() {
     const competitors = $$(".comp-row", $("#s-comps")).map((r) => Object.fromEntries($$("input", r).map((i) => [i.dataset.f, i.value.trim().replace(/^@/, "")])));
     try { await sendJSON("PUT", "/api/settings", { brand: $("#s-brand").value, competitors }); toast("Kaydedildi"); } catch (ex) { toast(ex.message); }
   });
+}
+
+/* ------------------------------------------------------------ içerik geçmişi: ilk çıktı → revizeler */
+
+const AP_STATE = { pending: ["Onay bekliyor", "orange"], approved: ["Onaylandı", "green"], revision: ["Revize istendi", "purple"], rejected: ["Reddedildi", "red"] };
+
+function pageContentHistory() {
+  const id = params().get("id");
+  view.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+  const media = (list) => list.length ? `<div class="ap-media">${list.map((m) => /\.(mp4|mov|webm|m4v)$/i.test(m)
+    ? `<video src="${fileUrl("media", m)}#t=0.5" preload="metadata" muted playsinline data-lb="${esc(m)}" data-k="video"></video>`
+    : `<img src="${fileUrl("media", m)}" loading="lazy" alt="${esc(m)}" data-lb="${esc(m)}" data-k="image">`).join("")}</div>` : `<div class="muted hv-nomedia">Bu sürümde görsel/video yok</div>`;
+  const runLink = (r, label) => r ? `<a class="hv-run" href="#/calisma?id=${r.id}">${label}: <b>${esc(r.title)}</b> · ${fmtDate(r.created)} ${runChip(r.status)}</a>` : "";
+  const load = async () => {
+    const d = await api(`/api/approvals/${id}/history`).catch((e) => ({ error: e.message }));
+    if (d.error) { view.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
+    const last = d.versions[d.versions.length - 1];
+    view.innerHTML = `
+      <div class="page-head"><div><h1 class="page-title">${esc(d.title)}</h1>
+        <p class="page-desc">${d.versions.length} sürüm · ilk çıktı ${fmtDate(d.versions[0].created)} · son durum: ${AP_STATE[last.status]?.[0] || last.status}</p></div>
+        <a class="btn btn-sm" href="#/onay">← Onay</a></div>
+      <div class="hv-timeline">${d.versions.map((v, n) => {
+        const [sl, sc] = AP_STATE[v.status] || [v.status, "gray"];
+        const rr = v.revision_run_info;
+        return `<section class="card hv-ver ${v.id === id ? "current" : ""}">
+          <div class="hv-head">${chip(n === 0 ? "İlk çıktı" : `Revize ${n}`, n === 0 ? "gold" : "purple")} ${chip(v.kind, "gray")}
+            <span class="muted">${esc(v.agent_name)} · ${fmtDate(v.created)}</span><span class="hv-state">${chip(sl, sc)}</span></div>
+          ${runLink(v.made_by_run, n === 0 ? "Başlangıç" : "Revize çalıştırması")}
+          ${media(v.media)}
+          <details class="hv-body" ${v.id === id ? "open" : ""}><summary>İçerik metni</summary><div class="markdown">${renderMarkdown(v.body)}</div></details>
+          ${v.decided ? `<div class="hv-decision"><b>Kurucu kararı (${fmtDate(v.decided)}):</b> ${esc(sl)}${v.note ? ` — “${esc(v.note)}”` : ""}</div>` : ""}
+          ${rr ? `<div class="hv-next ${rr.status === "failed" ? "bad" : ""}">↓ ${runLink(rr, "Revize")} ${rr.error ? `<div class="hv-err">${esc(rr.error)}</div>` : ""}
+            ${!v.revised_by && rr.status === "done" ? `<div class="hv-err">Çalıştırma bitti ama yeni sürüm onaya gelmedi.</div>` : ""}</div>` : ""}
+          ${v.status === "revision" && !rr ? `<div class="hv-err">Bu revize isteği için çalıştırma kaydı yok (eski sürümde başlatılmış olabilir). Onay → Revizede'den "Revizeyi tekrar başlat" ile yeniden başlatın.</div>` : ""}
+        </section>`;
+      }).join('<div class="hv-arrow">↓</div>')}</div>`;
+  };
+  view.addEventListener("click", (e) => { const lb = e.target.closest("[data-lb]"); if (lb) openLightbox(lb.dataset.lb, lb.dataset.k); });
+  load();
+  return onLive((ev) => { if (["run_end", "approval"].includes(ev.type)) load(); });
 }
 
 /* ------------------------------------------------------------ takvim: günlük geçmiş */
