@@ -1,4 +1,4 @@
-# 2 · Strateji Analisti · Haftalık Rakip Taraması
+# 3 · Strateji Analisti · Haftalık Rakip Taraması
 
 **Tarih:** 18.10.2026 · **Dönem:** 11.10–18.10.2026 · **Kaynak:** `1-icerik-tarayici.md`
 **Çalışma şekli:** API'siz, Claude aboneliği

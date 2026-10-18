@@ -12,17 +12,19 @@ Bu klasör, BOLBÉ AI ekibinin **Claude API'si kullanılmadan**, Claude aboneli�
 
 ## Klasör düzeni
 - `marka.md`: marka profili ve rakip listesi. Ajanlar önce bunu okur.
+- `urunler.md`: BOLBÉ ve rakip ürün kataloğu (fiyat, hacim, içerik). Her taramada güncellenir.
 - `ajanlar/`: takım ve ajan talimatları (panelin `app/team.py` dosyasındaki rollerle aynı).
 - `raporlar/<tarih>-<akış>/`: her çalıştırmanın adım adım raporları ve birleşik rapor.
 
 ## Nasıl çalışır
 1. Claude Code oturumu `ajanlar/rakip-analiz.md` talimatlarını okur.
 2. **İçerik Tarayıcı** adımında Virale'den veriyi Claude'daki ChatPlace bağlantısıyla çeker ve `1-icerik-tarayici.md` dosyasını yazar.
-3. **Strateji Analisti** ayrı bir alt ajan olarak (Sonnet) bu raporu okur ve `2-strateji-analisti.md` dosyasını yazar.
-4. **Erken Uyarı Ajanı** ayrı bir alt ajan olarak (Haiku) iki raporu okur ve şu dosyaları yazar:
-   - `3-erken-uyari.md`
+3. **Ürün Karşılaştırma Analisti** ayrı bir alt ajan olarak (Sonnet) rakiplerin ürünlerini web aramasıyla BOLBÉ'deki muadilleriyle karşılaştırır (fiyat, ml başı fiyat, içerik, vaat). `2-urun-karsilastirma.md` dosyasını yazar ve `urunler.md` kataloğunu günceller.
+4. **Strateji Analisti** ayrı bir alt ajan olarak (Sonnet) önceki raporları okur ve `3-strateji-analisti.md` dosyasını yazar.
+5. **Erken Uyarı Ajanı** ayrı bir alt ajan olarak (Haiku) tüm raporları okur ve şu dosyaları yazar:
+   - `4-erken-uyari.md`
    - birleşik `haftalik-rakip-raporu.md`
-5. Raporlar bu depoya kaydedilir.
+6. Raporlar bu depoya kaydedilir.
 
 ## Elle çalıştırma
 Bu depo bağlıyken bir Claude Code oturumunda şunu yazın:

@@ -1,8 +1,8 @@
-# 3 · Erken Uyarı Ajanı · Haftalık Rakip Taraması
+# 4 · Erken Uyarı Ajanı · Haftalık Rakip Taraması
 
 Tarih: 18.10.2026 · Çalışma şekli: API'siz, Claude aboneliği
 
-Kaynak: `1-icerik-tarayici.md` ve `2-strateji-analisti.md`. Dönem: 11.10–18.10.2026. Dönem dışındaki içerikler yalnızca bağlam için anılır ve tarihleriyle belirtilir.
+Kaynak: `1-icerik-tarayici.md` ve `3-strateji-analisti.md`. Dönem: 11.10–18.10.2026. Dönem dışındaki içerikler yalnızca bağlam için anılır ve tarihleriyle belirtilir.
 
 **Genel durum:** Kritik seviyede uyarı yok. Bir önemli, iki bilgi uyarısı var.
 

@@ -9,6 +9,7 @@
 3. Bu hafta rakipler arasında en yüksek etkileşim, The Purest Solutions'ın vücut bakımı rutini reel'inde (12.10): %4,24.
 4. Cream Co. 11–15.10 arasında parfüm, yüz spreyi ve iş birliği içeriklerine yöneldi; cilt bakımı dışı ağırlık arttı.
 5. BOLBÉ'de en yüksek etkileşim quiz içeriğinde (12.10): %5,72 ve 19 yorum. Ürün reel'leri 547–1.463 izlenmede kaldı.
+6. Ürün karşılaştırması: BOLBÉ, SPF'de rakipten ml başına daha uygun, peptitli HA serumda liste fiyatında uygun ama rakip kampanyasında pahalı. Dudak bakımı, yüz spreyi ve asitli tonik BOLBÉ'de bulunmayan kategoriler.
 
 ## Uyarılar
 
@@ -26,6 +27,22 @@ Bu hafta rakip ortalamasının belirgin üstünde içerik yoktu (en yüksek yakl
 - **The Ordinary (3.120.719):** Bu hafta 4 içerik, 52.387–136.694 izlenme, %0,88–1,87. Ortalama 113.231 izlenme. Lansman, pop-up, eğitim ve mağaza kampanyası.
 - **Cream Co. (73.763):** Bu hafta 3 içerik, 5.818–33.398 izlenme. Ortalama 26.520. Beğeniler gizli; etkileşim oranı güvenilir değil.
 - **BOLBÉ (8.808, karşılaştırma):** Bu hafta 4 içerik, 547–2.306 izlenme. En güçlü içerik quiz.
+
+## Ürün karşılaştırması: rakip ürünleri ve BOLBÉ muadilleri
+
+Fiyatlar TL, ml başı. K = kampanyalı, L = liste fiyatı. Ayrıntı: `2-urun-karsilastirma.md`, katalog: `apisiz/urunler.md`.
+
+| Kategori | Rakip ürün | Rakip (TL/ml) | BOLBÉ muadili | BOLBÉ (TL/ml) | Sonuç |
+|---|---|---|---|---|---|
+| SPF | Cream Co. Everyday SPF 50 | 7,50 K / 19,25 L | Sun Drop SPF 50+ | 5,32 K / 10,65 L | BOLBÉ iki fiyatta da daha uygun |
+| HA + peptit serum | Cream Co. HA Peptide Serum | 8,00 K / 20,00 L | Peptitli HA Serumu | 13,17 | Listede BOLBÉ uygun, rakip kampanyasında pahalı |
+| Bariyer serumu | The Ordinary Soothing & Barrier Support | 37,25 (tek satıcı) | Peptitli HA Serumu | 13,17 | BOLBÉ uygun; kaynak zayıf |
+| Nemlendirici | Cream Co. PDRN Collagen | 6,80 | Prebiyotikli Yüz Kremi | 7,78 | Fiyat yakın; fark içerikte |
+| Tonik | The Ordinary Milky Toner | TL bulunamadı | Nem Toniği 200 ml | 2,75 (Gratis Kart 1,37) | Hacim avantajı BOLBÉ'de |
+
+**Ürün boşlukları (BOLBÉ'de muadil yok):** dudak bakımı (The Ordinary'nin bu haftaki lansmanı bu kategoride), asitli tonik, yüz spreyi, renkli SPF, yatıştırma odaklı ayrı serum.
+**İletişimde öne çıkarılabilecek farklar:** prebiyotik içerik, tek serumda peptit + seramid + beta-glukan + prebiyotik (markanın vaadi), SPF ve tonikte fiyat/hacim avantajı, Gratis'te tek noktadan erişim.
+**Not:** BOLBÉ fiyatları Gratis arama özetlerinden alındı ve sayfada doğrulanmadı. Rakip fiyatlarının çoğu "tükendi" görünen eczane sayfalarından geliyor; kampanya fiyatları kalıcı olmayabilir.
 
 ## BOLBÉ için bu haftanın 5 önerisi
 
@@ -48,5 +65,6 @@ Bu hafta rakip ortalamasının belirgin üstünde içerik yoktu (en yüksek yakl
 ## Kaynak dosyalar
 
 - `1-icerik-tarayici.md`
-- `2-strateji-analisti.md`
-- `3-erken-uyari.md`
+- `2-urun-karsilastirma.md`
+- `3-strateji-analisti.md`
+- `4-erken-uyari.md`
