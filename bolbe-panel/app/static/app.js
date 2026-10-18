@@ -418,7 +418,7 @@ function pageRun() {
     const groups = [];
     for (const ev of data.events) {
       if (!ev.agent) continue;
-      if (!groups.length || groups[groups.length - 1].agent !== ev.agent || ev.type === "agent_start") groups.push({ agent: ev.agent, rows: [] });
+      if (!groups.length || groups[groups.length - 1].agent !== ev.agent || ev.type === "agent_start") groups.push({ agent: ev.agent, model: ev.model, rows: [] });
       if (ev.type !== "agent_start") groups[groups.length - 1].rows.push(ev);
     }
     const outputs = data.outputs.map((o) => o.type === "report" ? `<a class="btn btn-sm" href="#/raporlar?r=${encodeURIComponent(o.name)}">▤ ${esc(o.name)}</a>`
@@ -436,7 +436,7 @@ function pageRun() {
         ${data.error ? `<p style="color:var(--red);margin-top:10px">${esc(data.error)}</p>` : ""}
         ${outputs ? `<div class="card-title" style="margin-top:14px">Çıktılar</div><div class="outputs">${outputs}</div>` : ""}</div>
       <div class="card"><div class="card-title">Zaman çizelgesi</div><div class="timeline">${groups.map((g) => `
-        <div class="tl-agent" style="color:${state.agents[g.agent]?.color || "var(--gold)"}">● ${esc(agentName(g.agent))}</div>
+        <div class="tl-agent" style="color:${state.agents[g.agent]?.color || "var(--gold)"}">● ${esc(agentName(g.agent))}${g.model ? ` <span class="chip chip-gray">${esc(g.model)}</span>` : ""}</div>
         ${g.rows.map((ev) => `<div class="tl-row ${evClass(ev.type)}"><span class="log-time">${fmtTime(ev.time)}</span><div class="what">${ev.type === "text" || ev.type === "agent_done" ? renderMarkdown(ev.text || describe(ev)) : esc(describe(ev))}</div></div>`).join("")}`).join("")
         || `<div class="empty">${data.status === "queued" ? "Sırada bekliyor…" : "Olay yok"}</div>`}</div></div>`;
   };
@@ -710,18 +710,45 @@ function pageSettings() {
         <div id="s-comps"></div>
         <div style="display:flex;gap:8px;justify-content:space-between"><button type="button" class="btn btn-sm" id="add-comp">＋ Rakip ekle</button><button type="submit" class="btn btn-gold">Kaydet</button></div>
       </form>
-      <div class="card"><div class="card-title">🔌 Bağlantılar ve bütçe</div><dl class="kv" id="s-info"></dl></div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="card"><div class="card-title">🧠 Ajan modelleri</div>
+          <p class="muted" style="font-size:.88rem;margin-bottom:10px">Her ajan kendi işine uygun modelle çalışır. Değişiklik bir sonraki çalıştırmadan itibaren geçerlidir.</p>
+          <div class="model-presets"><button type="button" class="btn btn-sm" data-preset="default">Önerilen</button><button type="button" class="btn btn-sm" data-preset="claude-haiku-5-5">Tümü Haiku</button><button type="button" class="btn btn-sm" data-preset="claude-opus-5-5">Tümü Opus</button></div>
+          <div id="s-models"></div><div class="muted" id="s-model-prices" style="font-size:.82rem;margin-top:10px"></div></div>
+        <div class="card"><div class="card-title">🔌 Bağlantılar ve bütçe</div><dl class="kv" id="s-info"></dl></div>
+      </div>
     </div>`;
   const compRow = (c = {}) => `<div class="comp-row"><input type="text" placeholder="Marka adı" value="${esc(c.name || "")}" data-f="name" required>
     <input type="text" placeholder="instagram kullanıcı adı" value="${esc(c.handle || "")}" data-f="handle" pattern="[A-Za-z0-9._]*">
     <input type="text" placeholder="Takipçi" value="${esc(c.followers || "")}" data-f="followers"><button type="button" class="btn btn-sm btn-danger" data-rm>✕</button></div>`;
+  let modelState = null;
+  const drawModels = () => {
+    const { models, model_choices: choices } = modelState;
+    $("#s-models").innerHTML = state.teams.map((t) => `<div class="model-team" style="--team-c:${t.color}"><div class="model-team-name">${t.icon} ${esc(t.name)}</div>
+      ${t.agents.map((a) => `<label class="model-row"><span>${esc(a.name)}</span><select data-agent="${a.id}">
+        ${choices.map((c) => `<option value="${c.id}" ${models[a.id] === c.id ? "selected" : ""}>${esc(c.label)}${modelState.model_defaults[a.id] === c.id ? " ★" : ""}</option>`).join("")}
+      </select></label>`).join("")}</div>`).join("");
+    $("#s-model-prices").innerHTML = choices.map((c) => `<b>${esc(c.label)}</b>: ${esc(c.note)} · $${c.price.input} / $${c.price.output} (1M girdi / çıktı token)`).join("<br>") + "<br>★ ajanın görevi için önerilen model";
+  };
+  const saveModels = async (changes) => {
+    try {
+      const r = await sendJSON("PUT", "/api/settings/models", { models: changes });
+      Object.assign(modelState.models, changes); drawModels(); toast(`Kaydedildi: ${r.summary}`);
+    } catch (ex) { toast(ex.message); drawModels(); }
+  };
+  $("#s-models").addEventListener("change", (e) => { const sel = e.target.closest("select[data-agent]"); if (sel) saveModels({ [sel.dataset.agent]: sel.value }); });
+  $$("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+    const p = b.dataset.preset;
+    saveModels(Object.fromEntries(Object.keys(modelState.models).map((id) => [id, p === "default" ? modelState.model_defaults[id] : p])));
+  }));
   api("/api/settings").then((s) => {
+    modelState = { models: s.models, model_defaults: s.model_defaults, model_choices: s.model_choices }; drawModels();
     $("#s-brand").value = s.brand;
     $("#s-comps").innerHTML = s.competitors.map(compRow).join("");
     const pct = s.budget.limit ? Math.min(100, (s.budget.spent / s.budget.limit) * 100) : 0;
     $("#s-info").innerHTML = `
       <dt>Claude API</dt><dd>${s.integrations.claude ? chip("Bağlı", "green") : chip("ANTHROPIC_API_KEY yok", "red")}</dd>
-      <dt>Model</dt><dd>${esc(s.integrations.model)}</dd>
+      <dt>Modeller</dt><dd>${esc(s.integrations.model)}</dd>
       <dt>Virale (ChatPlace)</dt><dd>${s.integrations.virale ? chip("Bağlı", "green") : chip("VIRALE_MCP_URL yok", "orange")}</dd>
       <dt>Bu ay harcanan</dt><dd>${fmtUsd(s.budget.spent)} / ${fmtUsd(s.budget.limit)}<div class="budget-bar"><span style="width:${pct}%"></span></div></dd>
       <dt>Üretim sınırı</dt><dd>Çalıştırma başına ${s.limits.generations_per_run} görsel/video</dd>

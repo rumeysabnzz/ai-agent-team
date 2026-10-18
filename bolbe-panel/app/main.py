@@ -138,7 +138,7 @@ async def overview() -> dict[str, Any]:
     return {
         "teams": public_team_view(),
         "live": list(runner.bus.live.values()),
-        "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.MODEL},
+        "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
         "budget": {"month": runner.month_key(), "spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
         "stats": {
             "pending": sum(1 for a in approvals if a["status"] == "pending"),
@@ -361,7 +361,11 @@ class SettingsBody(BaseModel):
 async def get_settings() -> dict[str, Any]:
     s = runner.get_settings()
     return {"brand": s["brand"], "competitors": s["competitors"],
-            "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.MODEL},
+            "models": {aid: runner.model_for(aid, s) for aid in AGENTS},
+            "model_defaults": {aid: a["model"] for aid, a in AGENTS.items()},
+            "model_choices": [{"id": mid, "label": m["label"], "note": m["note"], "price": m["price"]}
+                              for mid, m in runner.MODELS.items()],
+            "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
             "budget": {"spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
             "limits": {"generations_per_run": runner.MAX_GENERATIONS_PER_RUN, "turns": runner.MAX_TURNS}}
 
@@ -375,6 +379,23 @@ async def put_settings(body: SettingsBody) -> dict[str, Any]:
         storage.write_state("settings", s)
     await storage.log_activity("Ayarlar güncellendi (marka profili / rakipler)", "info")
     return {"ok": True}
+
+
+class ModelsBody(BaseModel):
+    models: dict[str, str] = Field(max_length=40)
+
+
+@app.put("/api/settings/models", dependencies=auth)
+async def put_models(body: ModelsBody) -> dict[str, Any]:
+    for agent_id, model in body.models.items():
+        if agent_id not in AGENTS or model not in runner.MODELS:
+            raise HTTPException(400, f"Geçersiz ajan veya model: {agent_id} → {model}")
+    async with storage.state_lock:
+        s = runner.get_settings()
+        s["models"].update(body.models)
+        storage.write_state("settings", s)
+    await storage.log_activity(f"Ajan modelleri güncellendi: {runner.model_summary()}", "info")
+    return {"ok": True, "summary": runner.model_summary()}
 
 
 # ---------------------------------------------------------------- arayüz

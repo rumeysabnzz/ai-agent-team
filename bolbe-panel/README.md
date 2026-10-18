@@ -31,7 +31,11 @@ Telefonda ana ekrana eklenebilir (PWA).
 
 ## Nasıl çalışır
 
-- Her ajan Claude Opus 5.5 ile kendi araç döngüsünde çalışır (uyarlanabilir düşünme, ajana göre `effort`). Ret durumunda Anthropic'in sunucu tarafı yedek modeli (`fallbacks: "default"`) devreye girer.
+- Her ajan kendi araç döngüsünde, görevine uygun modelle çalışır (uyarlanabilir düşünme, ajana göre `effort`):
+  - **Haiku 5.5** (en ucuz): İçerik Tarayıcı, Erken Uyarı, Performans Analisti, Hedef Kitle Analisti, Görsel Tasarımcı, Carousel Uzmanı, Video Üretici, Video Editör. Veri toplama ve Virale araçlarını kullanma işleri.
+  - **Sonnet 5.5**: Strateji Analisti, Strateji Plancısı, Copywriter, Senaryo Yazarı. Analiz ve marka metni.
+  - Modeller panelin **Ayarlar → Ajan modelleri** bölümünden ajan başına değiştirilebilir (Opus 5.5 da seçilebilir).
+- Sonnet ve Opus'ta ret durumunda Anthropic'in sunucu tarafı yedek modeli (`fallbacks: "default"`) devreye girer; Haiku 5.5'te bu özellik yoktur.
 - **Web araması**: Anthropic'in sunucu aracı (`web_search_20260209`).
 - **Virale (ChatPlace)**: MCP bağlayıcısıyla. Her ajan yalnız kendi izin listesindeki Virale araçlarını görür (okuma, rakip hesap ekleme, görsel/carousel/video üretimi). Mesaj gönderme, otomasyon, silme gibi araçlar hiçbir ajana açık değildir.
 - **Panel araçları**: dosya listeleme/okuma, rapor kaydı, üretilen medyayı galeriye indirme, onaya gönderme, uyarı verme.
@@ -55,7 +59,7 @@ Telefonda ana ekrana eklenebilir (PWA).
 | `MONTHLY_BUDGET_USD` | Aylık Claude harcama sınırı, ör. `50` |
 | `PORT` | `8080` |
 
-İsteğe bağlı: `MAX_GENERATIONS_PER_RUN` (12), `MAX_AGENT_TURNS` (30), `MAX_PARALLEL_RUNS` (2), `MAX_UPLOAD_MB` (200), `SESSION_DAYS` (30), `TZ_NAME` (`Europe/Istanbul`), `CLAUDE_MODEL` (`claude-opus-5-5`).
+İsteğe bağlı: `MAX_GENERATIONS_PER_RUN` (12), `MAX_AGENT_TURNS` (30), `MAX_PARALLEL_RUNS` (2), `MAX_UPLOAD_MB` (200), `SESSION_DAYS` (30), `TZ_NAME` (`Europe/Istanbul`).
 
 5. **Settings → Networking → Generate Domain** (port 8080).
 
@@ -63,7 +67,7 @@ Telefonda ana ekrana eklenebilir (PWA).
 
 ## Maliyet
 
-- Claude: Opus 5.5 fiyatıyla ($4 / $20 her 1M girdi/çıktı token; web araması $10 / 1000 arama) her çalıştırmanın maliyeti panelde gösterilir ve aylık toplam bütçeyle sınırlanır. Sistem talimatları önbelleğe alınır.
+- Claude (1M girdi / çıktı token başına): Haiku 5.5 $0,10 / $0,50 (istem 100K token'ı aşarsa $0,50 / $2,50), Sonnet 5.5 $2 / $10, Opus 5.5 $4 / $20. Web araması $10 / 1000 arama. Her çalıştırmanın maliyeti ajanın modeline göre hesaplanıp panelde gösterilir ve aylık toplam bütçeyle sınırlanır. Sistem talimatları önbelleğe alınır.
 - Virale üretimleri ChatPlace AI bakiyenizden düşer; panel bunları ölçmez, yalnız sayısını sınırlar.
 
 ## Yerelde çalıştırma

@@ -321,6 +321,11 @@ pre.markdown{white-space:pre-wrap}
 
 /* ---------- ayarlar ---------- */
 .comp-row{display:grid;grid-template-columns:1.3fr 1fr .7fr auto;gap:8px;margin-bottom:8px}
+.model-presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.model-team{border-left:3px solid var(--team-c);padding:2px 0 2px 12px;margin-bottom:12px}
+.model-team-name{font-weight:750;font-size:.92rem;margin-bottom:6px}
+.model-row{display:grid;grid-template-columns:1fr minmax(150px,190px);gap:10px;align-items:center;padding:4px 0;font-size:.92rem;color:var(--text)}
+.model-row select{padding:8px 10px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:0.9rem;align-items:center}
 .kv dt{color:var(--muted)}
 .budget-bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden;margin-top:6px}

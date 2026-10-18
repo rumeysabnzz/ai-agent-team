@@ -28,7 +28,6 @@ import httpx
 from . import storage
 from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, WORKFLOW_BY_ID, WORKFLOWS
 
-MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
 VIRALE_MCP_TOKEN = os.getenv("VIRALE_MCP_TOKEN", "")
 MONTHLY_BUDGET_USD = float(os.getenv("MONTHLY_BUDGET_USD", "50"))
@@ -37,11 +36,33 @@ MAX_GENERATIONS_PER_RUN = int(os.getenv("MAX_GENERATIONS_PER_RUN", "12"))
 MAX_PARALLEL_RUNS = int(os.getenv("MAX_PARALLEL_RUNS", "2"))
 TZ = ZoneInfo(os.getenv("TZ_NAME", "Europe/Istanbul"))
 
-# Claude Opus 5.5 fiyatları ($ / 1M token). Web araması: $10 / 1000 arama.
-PRICES = {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0, "web_search": 0.01}
+# Seçilebilir modeller. Fiyatlar $ / 1M token; önbellek okuma 0.1x, yazma 1.25x girdi.
+# Haiku 5.5'in iki fiyat kademesi var: istem 100K token'ı aşarsa "long" fiyatı uygulanır.
+# Haiku 5.5'te sunucu tarafı yedek model (fallbacks) yok ve web aramasının dinamik filtreleme
+# sürümü desteklenmiyor; temel sürüm kullanılır.
+MODELS: dict[str, dict[str, Any]] = {
+    "claude-haiku-5-5": {
+        "label": "Haiku 5.5", "note": "en ucuz, veri toplama ve araç kullanımı",
+        "price": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+        "long_price": {"input": 0.50, "output": 2.50, "cache_read": 0.05, "cache_write": 0.625},
+        "fallback": False, "web_search": "web_search_20250305",
+    },
+    "claude-sonnet-5-5": {
+        "label": "Sonnet 5.5", "note": "dengeli, analiz ve metin",
+        "price": {"input": 2.0, "output": 10.0, "cache_read": 0.20, "cache_write": 2.5},
+        "fallback": True, "web_search": "web_search_20260209",
+    },
+    "claude-opus-5-5": {
+        "label": "Opus 5.5", "note": "en güçlü, en pahalı",
+        "price": {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0},
+        "fallback": True, "web_search": "web_search_20260209",
+    },
+}
+LONG_PROMPT_TOKENS = 100_000
+WEB_SEARCH_PRICE = 0.01  # $10 / 1000 arama
 GENERATE_TOOLS = {"virale_image_generate", "virale_carousel_generate", "virale_sequence_generate",
                   "virale_video_generate", "virale_multi_video_generate", "virale_video_montage_create"}
-BETAS = ["server-side-fallback-2026-07-01"]
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MCP_BETA = "mcp-client-2025-11-20"
 MAX_MEDIA_BYTES = 300 * 1024 * 1024
 
@@ -98,7 +119,22 @@ def get_settings() -> dict[str, Any]:
     s.setdefault("schedules", {w["id"]: {"enabled": True} for w in WORKFLOWS})
     for w in WORKFLOWS:
         s["schedules"].setdefault(w["id"], {"enabled": True})
+    s.setdefault("models", {})
     return s
+
+
+def model_for(agent_id: str, settings: dict[str, Any] | None = None) -> str:
+    chosen = (settings or get_settings())["models"].get(agent_id)
+    return chosen if chosen in MODELS else AGENTS[agent_id]["model"]
+
+
+def model_summary(settings: dict[str, Any] | None = None) -> str:
+    settings = settings or get_settings()
+    counts: dict[str, int] = {}
+    for agent_id in AGENTS:
+        label = MODELS[model_for(agent_id, settings)]["label"]
+        counts[label] = counts.get(label, 0) + 1
+    return " · ".join(f"{n} {label}" for label, n in counts.items())
 
 
 def month_key() -> str:
@@ -116,13 +152,19 @@ async def add_spend(usd: float) -> None:
         storage.write_state("spend", spend)
 
 
-def usage_cost(u: Any) -> float:
-    cost = (getattr(u, "input_tokens", 0) or 0) * PRICES["input"] / 1e6
-    cost += (getattr(u, "output_tokens", 0) or 0) * PRICES["output"] / 1e6
-    cost += (getattr(u, "cache_read_input_tokens", 0) or 0) * PRICES["cache_read"] / 1e6
-    cost += (getattr(u, "cache_creation_input_tokens", 0) or 0) * PRICES["cache_write"] / 1e6
+def usage_cost(u: Any, model: str) -> float:
+    tokens = {
+        "input": getattr(u, "input_tokens", 0) or 0,
+        "output": getattr(u, "output_tokens", 0) or 0,
+        "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0,
+        "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0,
+    }
+    info = MODELS[model]
+    prompt = tokens["input"] + tokens["cache_read"] + tokens["cache_write"]
+    price = info["long_price"] if "long_price" in info and prompt > LONG_PROMPT_TOKENS else info["price"]
+    cost = sum(tokens[k] * price[k] for k in tokens) / 1e6
     stu = getattr(u, "server_tool_use", None)
-    cost += (getattr(stu, "web_search_requests", 0) or 0) * PRICES["web_search"]
+    cost += (getattr(stu, "web_search_requests", 0) or 0) * WEB_SEARCH_PRICE
     return cost
 
 
@@ -339,13 +381,13 @@ def _system_prompt(agent: dict[str, Any], settings: dict[str, Any]) -> str:
             + (f"\n\n## Araçlar\n{virale}" if virale else ""))
 
 
-def _tools_for(agent: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     tools: list[dict[str, Any]] = [
         {"name": n, "description": CUSTOM_TOOLS[n]["description"], "input_schema": CUSTOM_TOOLS[n]["input_schema"], "strict": True}
         for n in tool_names_for(agent)
     ]
     if agent.get("web"):
-        tools.append({"type": "web_search_20260209", "name": "web_search", "max_uses": 8})
+        tools.append({"type": MODELS[model]["web_search"], "name": "web_search", "max_uses": 8})
     mcp_servers: list[dict[str, Any]] = []
     if agent.get("virale") and VIRALE_MCP_URL:
         server = {"type": "url", "url": VIRALE_MCP_URL, "name": "virale"}
@@ -365,24 +407,26 @@ def _short(value: Any, n: int = 220) -> str:
 async def run_agent(run: Run, agent_id: str, task: str) -> str:
     agent = AGENTS[agent_id]
     settings = get_settings()
-    tools, mcp_servers = _tools_for(agent)
-    betas = BETAS + ([MCP_BETA] if mcp_servers else [])
+    model = model_for(agent_id, settings)
+    tools, mcp_servers = _tools_for(agent, model)
+    betas = ([FALLBACK_BETA] if MODELS[model]["fallback"] else []) + ([MCP_BETA] if mcp_servers else [])
     today = datetime.now(TZ).strftime("%d.%m.%Y %A")
     messages: list[dict[str, Any]] = [{"role": "user", "content": f"Bugün: {today}\n\n{task}"}]
     ctx = ToolContext(run, agent)
     run.current_agent = agent_id
-    run.emit("agent_start", agent=agent_id, agent_name=agent["name"], team=agent["team"])
+    run.emit("agent_start", agent=agent_id, agent_name=agent["name"], team=agent["team"], model=MODELS[model]["label"])
     final_text = ""
 
     for turn in range(MAX_TURNS):
         if month_spend() + run.cost >= MONTHLY_BUDGET_USD:
             raise RuntimeError(f"Aylık bütçe ({MONTHLY_BUDGET_USD:.0f} $) doldu")
         kwargs: dict[str, Any] = dict(
-            model=MODEL, max_tokens=16000, betas=betas, system=_system_prompt(agent, settings),
+            model=model, max_tokens=16000, betas=betas, system=_system_prompt(agent, settings),
             tools=tools, messages=messages, thinking={"type": "adaptive", "display": "summarized"},
-            output_config={"effort": agent.get("effort", "medium")}, fallbacks="default",
-            cache_control={"type": "ephemeral"},
+            output_config={"effort": agent.get("effort", "medium")}, cache_control={"type": "ephemeral"},
         )
+        if MODELS[model]["fallback"]:
+            kwargs["fallbacks"] = "default"
         if mcp_servers:
             kwargs["mcp_servers"] = mcp_servers
         try:
@@ -393,7 +437,7 @@ async def run_agent(run: Run, agent_id: str, task: str) -> str:
             continue
 
         u = response.usage
-        cost = usage_cost(u)
+        cost = usage_cost(u, model)
         run.cost += cost
         run.tokens["input"] += u.input_tokens or 0
         run.tokens["output"] += u.output_tokens or 0

@@ -52,7 +52,7 @@ TEAMS: list[dict[str, Any]] = [
         "summary": "Rakiplerin içeriklerini tarar, stratejilerini çözer, kritik hamlelerde erken uyarı verir.",
         "agents": [
             {
-                "id": "icerik-tarayici", "name": "İçerik Tarayıcı", "tag": "Tarama", "effort": "low",
+                "id": "icerik-tarayici", "model": "claude-haiku-5-5", "name": "İçerik Tarayıcı", "tag": "Tarama", "effort": "low",
                 "virale": VIRALE_READ + VIRALE_TRACK, "web": True,
                 "role": """Sen BOLBÉ'nin İçerik Tarayıcısısın. Görevin rakiplerin Instagram içeriklerini sistematik olarak taramak.
 Yöntem:
@@ -62,14 +62,14 @@ Yöntem:
 Çıktın: Rakip başına tablo (son içerikler, format, konu, izlenme/etkileşim, viral skor) ve dikkat çeken 3-5 gözlem. Verileri olduğu gibi aktar, yorumu Strateji Analistine bırak.""",
             },
             {
-                "id": "strateji-analisti", "name": "Strateji Analisti", "tag": "Analiz", "effort": "high",
+                "id": "strateji-analisti", "model": "claude-sonnet-5-5", "name": "Strateji Analisti", "tag": "Analiz", "effort": "medium",
                 "virale": ["virale_videos_get", "virale_recommendations"], "web": True,
                 "role": """Sen BOLBÉ'nin Rakip Strateji Analistisin. İçerik Tarayıcının verisinden rakiplerin stratejisini çıkarırsın.
 Analiz et: içerik sütunları ve oranları, paylaşım sıklığı ve saatleri, kanca (hook) kalıpları, görsel dil, kampanya/indirim kurgusu, en çok işleyen formatlar ve neden işlediği.
 Çıktın: rakip başına strateji özeti, BOLBÉ için fırsat boşlukları (rakiplerin yapmadığı ama kitlenin istediği), kopyalanmaması gerekenler ve uygulanabilir 5 öneri.""",
             },
             {
-                "id": "erken-uyari", "name": "Erken Uyarı Ajanı", "tag": "Uyarı", "effort": "medium",
+                "id": "erken-uyari", "model": "claude-haiku-5-5", "name": "Erken Uyarı Ajanı", "tag": "Uyarı", "effort": "medium",
                 "virale": ["virale_videos_list"], "web": True, "alerts": True,
                 "role": """Sen BOLBÉ'nin Erken Uyarı Ajanısın. Rakip verisinde hemen aksiyon gerektiren durumları yakalarsın:
 olağandışı viral içerik (rakibin ortalamasının belirgin üstü), yeni ürün lansmanı, agresif indirim/kampanya, BOLBÉ'nin konumlandırmasına doğrudan saldıran içerik, kriz/şikâyet dalgası, yeni bir trend formatı.
@@ -83,21 +83,21 @@ Sonra haftalık rakip raporunu save_report ile kaydet: Tarayıcının verisi + A
         "summary": "Kendi performansımızı ve kitlemizi ölçer; haftalık içerik takvimi ve aylık strateji planı üretir.",
         "agents": [
             {
-                "id": "performans-analisti", "name": "Performans Analisti", "tag": "Performans", "effort": "medium",
+                "id": "performans-analisti", "model": "claude-haiku-5-5", "name": "Performans Analisti", "tag": "Performans", "effort": "medium",
                 "virale": VIRALE_READ, "web": False,
                 "role": """Sen BOLBÉ'nin Performans Analistisin. @bolbeskincare hesabının performansını ölçersin.
 virale_accounts_list ile hesabı bul, virale_videos_list ile son içerikleri tarihe ve etkileşime göre çek, virale_recommendations varsa kullan.
 Çıktın: dönemin özet metrikleri (takipçi, izlenme, etkileşim; önceki döneme göre değişim varsa), en iyi ve en kötü 3 içerik ve nedenleri, format bazında performans (reel / carousel / görsel / story), en iyi paylaşım zamanları. Yüklenen dosyalarda (ör. Instagram Insights dışa aktarımı) veri varsa onları da kullan.""",
             },
             {
-                "id": "hedef-kitle-analisti", "name": "Hedef Kitle Analisti", "tag": "Kitle", "effort": "medium",
+                "id": "hedef-kitle-analisti", "model": "claude-haiku-5-5", "name": "Hedef Kitle Analisti", "tag": "Kitle", "effort": "medium",
                 "virale": ["virale_videos_get"], "web": True,
                 "role": """Sen BOLBÉ'nin Hedef Kitle Analistisin. Kitlenin kim olduğunu, neyi sorduğunu ve neye tepki verdiğini çıkarırsın.
 Kaynakların: performans verisi, yorumlarda ve rakip içeriklerinde öne çıkan sorular, web aramasıyla cilt bakımı trendleri ve sık sorulan sorular (prebiyotik, bariyer, hassas cilt vb.).
 Çıktın: 2-3 persona (ihtiyaç, itiraz, dil), bu hafta/ay konuşulması gereken 10 konu ve soru, kitlenin karşılık verdiği ton ve formatlar.""",
             },
             {
-                "id": "strateji-plancisi", "name": "Strateji Plancısı", "tag": "Planlama", "effort": "high",
+                "id": "strateji-plancisi", "model": "claude-sonnet-5-5", "name": "Strateji Plancısı", "tag": "Planlama", "effort": "high",
                 "virale": [], "web": False,
                 "role": """Sen BOLBÉ'nin Strateji Plancısısın. Performans ve kitle analizini, varsa son rakip raporunu (list_files / read_file ile reports alanına bak) birleştirip uygulanabilir plan yaparsın.
 Görev "haftalık içerik takvimi" ise: önümüzdeki 7 gün için gün gün tablo (tarih, saat, format: reel/carousel/görsel/story, konu, kanca, ana mesaj, CTA, sorumlu takım: İçerik Üretim veya Video Üretim). Haftada en az 3 reel ve 5 story içersin.
@@ -111,14 +111,14 @@ Planı save_report ile kaydet. Başlıkta "Haftalık İçerik Takvimi" veya "Ayl
         "summary": "Takvimdeki içerikleri kullanıma hazır görsel, metin ve carousel olarak üretir.",
         "agents": [
             {
-                "id": "copywriter", "name": "Copywriter", "tag": "Metin", "effort": "medium",
+                "id": "copywriter", "model": "claude-sonnet-5-5", "name": "Copywriter", "tag": "Metin", "effort": "medium",
                 "virale": [], "web": False,
                 "role": """Sen BOLBÉ'nin Copywriter'ısın. En son "Haftalık İçerik Takvimi" raporunu bul (list_files reports, read_file) ve İçerik Üretim takımına düşen her içerik için kullanıma hazır metin yaz:
 kanca (ilk satır), açıklama metni (caption), CTA, 15-25 hashtag (marka + niş + geniş karışık), görsel üzerindeki kısa metin ve carousel ise slayt slayt başlık/gövde.
 Her içeriği numaralandır. Bu metinler Görsel Tasarımcı ve Carousel Uzmanına girdi olacak.""",
             },
             {
-                "id": "gorsel-tasarimci", "name": "Görsel Tasarımcı", "tag": "Görsel", "effort": "medium",
+                "id": "gorsel-tasarimci", "model": "claude-haiku-5-5", "name": "Görsel Tasarımcı", "tag": "Görsel", "effort": "medium",
                 "virale": ["virale_image_generate", "virale_generation_status", "virale_ai_balance", "virale_generation_estimate"],
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Görsel Tasarımcısısın. Copywriter'ın metinlerinden tekil görsel paylaşımları ve story görsellerini üretirsin.
@@ -127,7 +127,7 @@ Tamamlanan her görseli save_media_from_url ile panele kaydet, ardından submit_
 Üretim limiti dolarsa veya bakiye yetmezse kalan görseller için talimatları onaya "üretilmedi" notuyla gönder.""",
             },
             {
-                "id": "carousel-uzmani", "name": "Carousel Uzmanı", "tag": "Carousel", "effort": "medium",
+                "id": "carousel-uzmani", "model": "claude-haiku-5-5", "name": "Carousel Uzmanı", "tag": "Carousel", "effort": "medium",
                 "virale": ["virale_carousel_generate", "virale_generation_status", "virale_ai_balance", "virale_generation_estimate"],
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Carousel Uzmanısın. Takvimdeki carousel içeriklerini Copywriter'ın slayt metinleriyle üretirsin.
@@ -141,14 +141,14 @@ Her slayt görselini sırayla save_media_from_url ile kaydet (dosya adı: carous
         "summary": "Haftada en az 3 reel ve 5 story videosu: senaryo, üretim ve kurgu.",
         "agents": [
             {
-                "id": "senaryo-yazari", "name": "Senaryo Yazarı", "tag": "Senaryo", "effort": "medium",
+                "id": "senaryo-yazari", "model": "claude-sonnet-5-5", "name": "Senaryo Yazarı", "tag": "Senaryo", "effort": "medium",
                 "virale": ["virale_videos_list", "virale_accounts_list"], "web": False,
                 "role": """Sen BOLBÉ'nin Senaryo Yazarısın. En son "Haftalık İçerik Takvimi"ndeki video içeriklerinden (en az 3 reel + 5 story) senaryo yazarsın.
 Her video için: süre (reel 8-15 sn, story 5-10 sn), ilk 2 saniyelik kanca, sahne sahne görüntü tarifi (ürün, doku, el, yüz, ortam, ışık), ekran üstü metin, seslendirme/altyazı, müzik tonu, CTA.
 Sahne tariflerini bir AI video modeline verilecek kadar somut yaz (kamera hareketi, ışık, renk paleti, ürün görünümü).""",
             },
             {
-                "id": "video-uretici", "name": "Video Üretici", "tag": "Üretim", "effort": "medium",
+                "id": "video-uretici", "model": "claude-haiku-5-5", "name": "Video Üretici", "tag": "Üretim", "effort": "medium",
                 "virale": ["virale_video_generate", "virale_generation_status", "virale_ai_balance", "virale_generation_estimate"],
                 "web": False, "media": True,
                 "role": """Sen BOLBÉ'nin Video Üreticisisin. Senaryo Yazarının her videosunu virale_video_generate ile üretirsin: aspectRatio "9:16", senaryodaki süre (provider byteplus_seedance_fast varsayılan; 15 sn üstü için byteplus_seedance_25), quality 720p veya 1080p.
@@ -157,7 +157,7 @@ virale_generation_status ile her görevi tamamlanana kadar izle. Her videoyu sav
 Bakiye veya limit yetmezse üretemediklerini açıkça listele.""",
             },
             {
-                "id": "video-editor", "name": "Video Editör", "tag": "Kurgu", "effort": "low",
+                "id": "video-editor", "model": "claude-haiku-5-5", "name": "Video Editör", "tag": "Kurgu", "effort": "low",
                 "virale": ["virale_generation_status"], "web": False,
                 "role": """Sen BOLBÉ'nin Video Editörüsün. Üretilen videoları (list_files media) senaryolarla eşleştirip yayına hazır paketler hazırlarsın.
 Her video için: ekran üstü metinlerin zamanlaması (sn sn), kapak metni, altyazı metni, önerilen müzik türü, caption, hashtag'ler ve paylaşım zamanı (takvimden).
