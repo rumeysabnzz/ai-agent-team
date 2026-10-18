@@ -34,7 +34,7 @@
 }
 
 html{-webkit-text-size-adjust:100%}
-body{background:var(--bg);color:var(--text);font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;min-height:100vh;overflow-x:hidden;line-height:1.55;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;min-height:100vh;overflow-x:hidden;line-height:1.55;-webkit-font-smoothing:antialiased}
 /* zeminde çok hafif, canlı renk lekeleri */
 body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   background:radial-gradient(40vw 40vw at 8% 12%,rgba(6,182,212,.07),transparent 70%),
