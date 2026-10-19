@@ -91,6 +91,7 @@ DATA_DIR=./data PANEL_PASSWORD=deneme123 SESSION_SECRET=yerel-gizli-anahtar ANTH
 ## Güvenlik
 
 - Tek parolalı giriş; imzalı, `HttpOnly` çerez; 10 dakikada 10 hatalı denemede geçici kilit.
+- Parola Ayarlar sayfasından değiştirilebilir (diskte PBKDF2 özeti olarak saklanır; diğer cihazlardaki oturumlar kapanır). Unutulursa Railway'de `PANEL_PASSWORD` değiştirilir: değişken değişince paneldeki parola geçersiz olur ve yeni `PANEL_PASSWORD` ile girilir.
 - HTML/SVG dosyaları panelde çalıştırılmaz, indirme olarak verilir.
 - Medya yalnız herkese açık `https` adreslerinden indirilir (iç ağ ve özel IP'ler engelli).
 - Gerçek şirket verisi bu depoya eklenmez; veriler Railway diskinde durur.

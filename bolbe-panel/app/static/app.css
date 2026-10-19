@@ -405,6 +405,13 @@ pre.markdown{white-space:pre-wrap}
 @media (max-width:1180px){.cal-layout{grid-template-columns:1fr}.org-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:720px){.cal-day{min-height:52px;padding:4px}.cal-sum{display:none}.cal-num{font-size:.85rem}}
 
+/* ---------- parola yenileme ---------- */
+.link-btn{background:none;border:0;color:var(--brand);font:inherit;font-size:.9rem;cursor:pointer;text-decoration:underline;align-self:center}
+.forgot-box{text-align:left;background:var(--surface-2);border-radius:12px;padding:12px 14px;font-size:.88rem;line-height:1.5}
+.forgot-box ol{padding-left:18px;margin:6px 0}
+.forgot-box small{color:var(--muted)}
+.forgot-box code{background:var(--surface-3);padding:1px 5px;border-radius:5px}
+
 /* ---------- içerik geçmişi ---------- */
 .ap-title{color:inherit;text-decoration:none}
 .ap-title:hover{text-decoration:underline}

@@ -35,20 +35,52 @@ STATIC_DIR = Path(__file__).parent / "static"
 # ---------------------------------------------------------------- oturum
 
 
+# Parola: varsayılan olarak Railway'deki PANEL_PASSWORD. Panelden değiştirilirse PBKDF2 özeti diske yazılır.
+# Unutulursa Railway'de PANEL_PASSWORD değiştirilir; değişken değişince paneldeki parola geçersiz olur ve
+# yeni PANEL_PASSWORD ile girilir (env_fp karşılaştırması).
+
+
+def _env_fingerprint() -> str:
+    return hashlib.sha256(f"{PANEL_PASSWORD}|{SESSION_SECRET}".encode()).hexdigest()[:16]
+
+
+def _stored_auth() -> dict[str, Any] | None:
+    data = storage.read_state("auth", None)
+    return data if data and data.get("env_fp") == _env_fingerprint() else None
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 310_000).hex()
+
+
+def check_password(password: str) -> bool:
+    stored = _stored_auth()
+    if stored:
+        return hmac.compare_digest(_hash_password(password, bytes.fromhex(stored["salt"])), stored["hash"])
+    return hmac.compare_digest(password.encode(), PANEL_PASSWORD.encode())
+
+
+def _auth_version() -> str:
+    stored = _stored_auth()
+    return f"p{stored['version']}" if stored else "env"
+
+
 def _sign(payload: str) -> str:
     return hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
 def make_session() -> str:
+    # Oturum parola sürümüne bağlıdır: parola değişince eski oturumlar geçersiz olur.
     expires = str(int(time.time()) + SESSION_DAYS * 86400)
-    return f"{expires}.{_sign(expires)}"
+    return f"{expires}.{_sign(f'{expires}.{_auth_version()}')}"
 
 
 def valid_session(token: str | None) -> bool:
     if not token or "." not in token:
         return False
     expires, sig = token.split(".", 1)
-    return hmac.compare_digest(sig, _sign(expires)) and expires.isdigit() and int(expires) > time.time()
+    return (expires.isdigit() and int(expires) > time.time()
+            and hmac.compare_digest(sig, _sign(f"{expires}.{_auth_version()}")))
 
 
 def require_user(request: Request) -> None:
@@ -105,17 +137,47 @@ class LoginBody(BaseModel):
 
 @app.post("/api/login")
 async def login(body: LoginBody, request: Request) -> JSONResponse:
-    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0]
+    ip = _client_ip(request)
     if _rate_limited(ip):
         raise HTTPException(429, "Çok fazla deneme. 10 dakika sonra tekrar deneyin.")
-    if not hmac.compare_digest(body.password, PANEL_PASSWORD):
+    if not await asyncio.to_thread(check_password, body.password):
         _login_attempts.setdefault(ip, []).append(time.time())
         await asyncio.sleep(1)
         raise HTTPException(401, "Parola hatalı")
+    return _session_response(request)
+
+
+def _client_ip(request: Request) -> str:
+    return request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0]
+
+
+def _session_response(request: Request) -> JSONResponse:
     resp = JSONResponse({"ok": True})
     secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     resp.set_cookie(COOKIE_NAME, make_session(), max_age=SESSION_DAYS * 86400, httponly=True, secure=secure, samesite="lax")
     return resp
+
+
+class PasswordBody(BaseModel):
+    current: str
+    new: str = Field(min_length=10, max_length=200)
+
+
+@app.post("/api/password", dependencies=auth)
+async def change_password(body: PasswordBody, request: Request) -> JSONResponse:
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        raise HTTPException(429, "Çok fazla deneme. 10 dakika sonra tekrar deneyin.")
+    if not await asyncio.to_thread(check_password, body.current):
+        _login_attempts.setdefault(ip, []).append(time.time())
+        raise HTTPException(400, "Mevcut parola hatalı")
+    salt = os.urandom(16)
+    async with storage.state_lock:
+        version = (storage.read_state("auth", {}) or {}).get("version", 0) + 1
+        storage.write_state("auth", {"hash": await asyncio.to_thread(_hash_password, body.new, salt), "salt": salt.hex(),
+                                     "env_fp": _env_fingerprint(), "version": version, "changed": storage.now()})
+    await storage.log_activity("Panel parolası değiştirildi; diğer cihazlardaki oturumlar kapandı", "info")
+    return _session_response(request)
 
 
 @app.post("/api/logout")

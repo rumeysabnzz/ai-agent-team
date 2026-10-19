@@ -65,6 +65,7 @@ function showLogin() {
   $("#password").focus();
 }
 
+$("#forgot-toggle").addEventListener("click", () => ($("#forgot-box").hidden = !$("#forgot-box").hidden));
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#login-error").textContent = "";
@@ -823,6 +824,12 @@ function pageSettings() {
           <div class="model-presets"><button type="button" class="btn btn-sm" data-preset="default">Önerilen</button><button type="button" class="btn btn-sm" data-preset="claude-haiku-5-5">Tümü Haiku</button><button type="button" class="btn btn-sm" data-preset="claude-opus-5-5">Tümü Opus</button></div>
           <div id="s-models"></div><div class="muted" id="s-model-prices" style="font-size:.82rem;margin-top:10px"></div></div>
         <div class="card"><div class="card-title">🔌 Bağlantılar ve bütçe</div><dl class="kv" id="s-info"></dl></div>
+        <form class="card task-form" id="pw-form"><div class="card-title">🔑 Parola değiştir</div>
+          <input type="password" id="pw-cur" placeholder="Mevcut parola" autocomplete="current-password" required>
+          <input type="password" id="pw-new" placeholder="Yeni parola (en az 10 karakter)" autocomplete="new-password" minlength="10" required>
+          <input type="password" id="pw-new2" placeholder="Yeni parola (tekrar)" autocomplete="new-password" minlength="10" required>
+          <p class="muted" style="font-size:.84rem">Değiştirince diğer cihazlardaki oturumlar kapanır. Unutursanız Railway'deki PANEL_PASSWORD ile sıfırlanır.</p>
+          <button type="submit" class="btn btn-gold">Parolayı değiştir</button></form>
       </div>
     </div>`;
   const compRow = (c = {}) => `<div class="comp-row"><input type="text" placeholder="Marka adı" value="${esc(c.name || "")}" data-f="name" required>
@@ -864,6 +871,12 @@ function pageSettings() {
       <dt>Tur sınırı</dt><dd>Ajan başına ${s.limits.turns} tur</dd>
       <dt>Panel sürümü</dt><dd>${esc(s.version)}</dd>`;
   }).catch((e) => toast(e.message));
+  $("#pw-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if ($("#pw-new").value !== $("#pw-new2").value) return toast("Yeni parolalar aynı değil");
+    try { await sendJSON("POST", "/api/password", { current: $("#pw-cur").value, new: $("#pw-new").value }); e.target.reset(); toast("Parola değiştirildi"); }
+    catch (ex) { toast(ex.message); }
+  });
   $("#add-comp").addEventListener("click", () => $("#s-comps").insertAdjacentHTML("beforeend", compRow()));
   $("#s-comps").addEventListener("click", (e) => e.target.closest("[data-rm]")?.parentElement.remove());
   $("#settings-form").addEventListener("submit", async (e) => {

@@ -35,6 +35,18 @@
     <input id="password" type="password" autocomplete="current-password" placeholder="Parola" required>
     <button type="submit" class="btn btn-gold">Giriş yap</button>
     <p id="login-error" class="form-error" role="alert"></p>
+    <button type="button" class="link-btn" id="forgot-toggle">Şifremi unuttum</button>
+    <div class="forgot-box" id="forgot-box" hidden>
+      <b>Parolayı yenileme</b>
+      <ol>
+        <li>railway.app'e girin ve paneli açın (servis kartı).</li>
+        <li><b>Variables</b> sekmesinde <code>PANEL_PASSWORD</code> satırını bulun.</li>
+        <li>Parolayı panelden hiç değiştirmediyseniz göz simgesiyle mevcut parolayı görebilirsiniz. Değiştirdiyseniz kalem simgesiyle yeni bir parola yazın (en az 10 karakter).</li>
+        <li>Değiştirdiyseniz üstteki mor <b>Deploy</b> şeridine basın; panel 1–2 dakikada yeniden açılır.</li>
+        <li>Yeni parolayla giriş yapın. Panelden değiştirdiğiniz eski parola da bu işlemle geçersiz olur.</li>
+      </ol>
+      <small>Güvenlik için parola yalnız Railway hesabına erişimi olan kişi tarafından yenilenebilir.</small>
+    </div>
   </form>
 </section>
 
