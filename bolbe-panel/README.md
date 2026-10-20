@@ -31,6 +31,7 @@ Ajan talimatları `app/team.py` dosyasında. Marka profili ve rakip listesi pane
 | **Çalıştırma** | Bir çalıştırmanın adım adım canlı zaman çizelgesi, maliyeti ve çıktıları |
 | **Onay** | Üretilen görsel, carousel, reel, story ve metinler: önizle, metni kopyala, onayla, revize iste, reddet. Revize, içeriği üreten ajana gider (video için Video Üretici → Video Editör); kart revizenin durumunu ve yeni sürümü gösterir |
 | **İçerik geçmişi** | Onay kartındaki "Geçmiş" veya başlık: ilk çıktı, nasıl başladığı, Kurucu kararları ve tüm revize sürümleri sırayla |
+| **Rapor indirme** | Raporlar sayfasında her rapor **PDF sunum** (16:9, kapak + her bölüm bir sayfa), **Excel** (her tablo ayrı sayfa, sayılar sayı olarak), **PowerPoint**, **Word** ve **HTML** olarak indirilir. Eski ve yeni tüm raporlarda çalışır |
 | **Takvim** | Üst çubuktaki ▦ düğmesiyle açılan takvimden veya Takvim sayfasından gün seçilir; bir güne dokununca o gün yapılan çalıştırmalar, raporlar, görsel/videolar, onaylar, uyarılar ve aktivite |
 | **Gelişim** | Yönetim yapısı, yönetim raporları, ajan hafızaları (ders ekle/sil) ve bilgi bankası (kaynaklı not ekle/sil) |
 | **Raporlar** | Rakip raporları, içerik takvimleri, strateji planları |

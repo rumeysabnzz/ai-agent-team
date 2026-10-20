@@ -26,10 +26,21 @@ Bu klasör, BOLBÉ AI ekibinin **Claude API'si kullanılmadan**, Claude aboneli�
    - birleşik `haftalik-rakip-raporu.md`
 6. Raporlar bu depoya kaydedilir.
 
+## Sunum biçimleri (PDF, Excel, PowerPoint)
+Her rapor klasöründeki `sunum/` alt klasöründe raporların PDF (16:9 sunum), Excel ve PowerPoint hâlleri bulunur.
+Yeniden üretmek veya yeni raporları çevirmek için depo kökünden:
+
+```sh
+pip install -r bolbe-panel/requirements.txt
+python apisiz/sunuma_cevir.py pdf xlsx pptx    # docx ve html de verilebilir
+```
+
+Dönüştürücü panelle aynıdır (`bolbe-panel/app/export.py`).
+
 ## Elle çalıştırma
 Bu depo bağlıyken bir Claude Code oturumunda şunu yazın:
 
-> apisiz/ajanlar/rakip-analiz.md talimatlarıyla bu haftanın rakip taramasını API'siz çalıştır; raporları apisiz/raporlar/ altına kaydet ve main dalına gönder.
+> apisiz/ajanlar/rakip-analiz.md talimatlarıyla bu haftanın rakip taramasını API'siz çalıştır; raporları apisiz/raporlar/ altına kaydet, apisiz/sunuma_cevir.py ile PDF, Excel ve PowerPoint hâllerini üret ve main dalına gönder.
 
 ## Otomatik çalıştırma (isteğe bağlı)
 Claude Code'un zamanlanmış görev özelliğiyle aynı komut her pazartesi 08:00'de kendiliğinden çalıştırılabilir. Bu oturumlar abonelik kullanım hakkınızdan düşer.

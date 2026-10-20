@@ -7,6 +7,7 @@ Akış sırası: İçerik Tarayıcı → Ürün Karşılaştırma Analisti → S
 - Uydurma veri kullanma. Bir sayıyı Virale'den, web aramasından veya bir dosyadan almadıysan "tahmin" diye işaretle.
 - Önceki adımların raporları üzerine inşa et, tekrar etme.
 - Hataları ve veri sınırlarını raporun sonundaki "Veri sınırları" bölümüne yaz.
+- Raporlar PDF sunum, Excel ve PowerPoint'e çevrilir; sunuma uygun yaz: tek "# Başlık", altında bir satırlık künye, her konu için "## Bölüm" (bir slayt), kısa maddeler, karşılaştırmalar için tablolar (en fazla 8 sütun; birimi sütun başlığına yaz).
 
 ## 1. İçerik Tarayıcı · önerilen model: Haiku
 Rakiplerin Instagram içeriklerini Virale'den sistematik olarak tara.

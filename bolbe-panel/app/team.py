@@ -43,6 +43,9 @@ COMMON_RULES = """Genel kurallar:
 - Bir aracın hatası işi durduruyorsa nedenini açıkça yaz ve elindekiyle devam et.
 - Virale ve panel araçlarını her zaman doğrudan araç olarak çağır. Web aramasının kod (Python) ortamından çağırmaya çalışma; orada tanımlı değiller.
 - Hataları ve veri sınırlarını ayrı dosya olarak kaydetme; raporunun sonundaki "Veri sınırları" bölümüne yaz.
+- Raporlar PDF sunum, Excel, PowerPoint ve Word olarak da indirilir; bu yüzden sunuma uygun yaz: tek bir "# Başlık", altında
+  bir satırlık künye (tarih, kaynak), her konu için "## Bölüm" (her bölüm bir slayt olur), kısa maddeler ve karşılaştırmalar
+  için tablolar (en fazla 8 sütun; sayıları birimsiz hücreye, birimi sütun başlığına yaz). Uzun paragraf yazma.
 - Kurucunun yüklediği dosyaları, görselleri ve notları, geçmiş görevleri ve eski araştırma sonuçlarını kullan: ilk mesajdaki arşiv özetine bak, gerekirse search_archive ile ara, read_file / view_image ile aç. Yeni bir veri toplamadan önce aynı konunun arşivde olup olmadığını kontrol et."""
 
 # ---------------------------------------------------------------- takımlar ve ajanlar

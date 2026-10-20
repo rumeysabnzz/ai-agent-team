@@ -13,6 +13,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import convert, runner, storage
+from . import convert, export, runner, storage
 from .team import AGENTS, REVISION_ROUTES, WORKFLOW_BY_ID, WORKFLOWS, public_management_view, public_team_view
 
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
@@ -268,6 +269,18 @@ async def upload_files(area: str, files: list[UploadFile] = File(...), note: str
 async def file_markdown(area: str, name: str) -> dict[str, Any]:
     """Dosyanın ajanların okuduğu Markdown hâli (PDF, Word, Excel, PowerPoint dönüştürülür)."""
     return {"name": name, "markdown": await asyncio.to_thread(convert.to_markdown, area, name, 200_000)}
+
+
+@app.get("/api/files/{area}/{name}/export", dependencies=auth)
+async def file_export(area: str, name: str, format: str = "pdf") -> Response:
+    """Raporu sunuma hazır biçimde indirir: pdf (16:9 sunum), xlsx, pptx, docx, html."""
+    if format not in export.FORMATS:
+        raise HTTPException(400, f"Biçim şunlardan biri olmalı: {', '.join(export.FORMATS)}")
+    markdown = await asyncio.to_thread(convert.to_markdown, area, name, 400_000)
+    data, media_type, filename = await asyncio.to_thread(export.export, markdown, name, format)
+    quoted = urllib.parse.quote(filename)
+    return Response(data, media_type=media_type,
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"})
 
 
 @app.get("/api/files/{area}/{name}", dependencies=auth)

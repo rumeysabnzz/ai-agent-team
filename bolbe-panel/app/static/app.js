@@ -604,7 +604,11 @@ function pageReports() {
     const box = $("#report-view");
     const r = reports.find((x) => x.name === name) || { kind: /\.(md|txt|csv|json)$/i.test(name) ? "text" : "other" };
     $(".reports-layout").classList.add("has-report");
-    const bar = `<div class="report-toolbar"><button type="button" class="btn btn-sm only-mobile" data-back>← Raporlar</button><a class="btn btn-sm" href="${fileUrl("reports", name, true)}">↓ İndir</a></div>`;
+    const ex = (f, label, cls = "") => `<a class="btn btn-sm ${cls}" href="/api/files/reports/${encodeURIComponent(name)}/export?format=${f}">${label}</a>`;
+    const exportable = MD_EXT.test(name);
+    const bar = `<div class="report-toolbar"><button type="button" class="btn btn-sm only-mobile" data-back>← Raporlar</button>
+      ${exportable ? `<div class="export-group"><span class="muted">İndir:</span>${ex("pdf", "PDF sunum", "btn-gold")}${ex("xlsx", "Excel")}${ex("pptx", "PowerPoint")}${ex("docx", "Word")}${ex("html", "HTML")}<a class="btn btn-sm" href="${fileUrl("reports", name, true)}">Orijinal</a></div>`
+        : `<a class="btn btn-sm" href="${fileUrl("reports", name, true)}">↓ İndir</a>`}</div>`;
     if (r.kind === "pdf") { box.innerHTML = bar + `<iframe src="${fileUrl("reports", name)}" style="width:100%;height:75vh;border:0;border-radius:10px"></iframe>`; return; }
     if (r.kind === "image") { box.innerHTML = bar + `<img src="${fileUrl("reports", name)}" style="max-width:100%;border-radius:10px">`; return; }
     if (r.kind !== "text" || /\.html?$/i.test(name)) { box.innerHTML = bar + `<div class="empty">Bu dosya türü panelde önizlenemiyor. İndirip açabilirsiniz.</div>`; return; }
@@ -740,7 +744,7 @@ function pageFiles() {
       <div class="file-row"><div class="file-ico">${KIND_ICON[f.kind]}</div>
         <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${fmtSize(f.size)} · ${fmtDate(f.modified)}${area === "uploads" ? ` · ${f.team && f.team !== "genel" ? esc(state.teams.find((t) => t.id === f.team)?.name || f.team) : "tüm ekip"}` : ""}</div>
           ${f.note ? `<div class="file-note">📝 ${esc(f.note)}</div>` : ""}</div>
-        <div class="row-actions">${MD_EXT.test(f.name) ? `<button class="btn btn-sm" data-md="${esc(f.name)}" title="Ajanların okuduğu metin (Markdown)">MD</button>` : ""}${area === "uploads" ? `<button class="btn btn-sm" data-note="${esc(f.name)}" title="Ajanlara not">✎</button>` : ""}<a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
+        <div class="row-actions">${MD_EXT.test(f.name) ? `<button class="btn btn-sm" data-md="${esc(f.name)}" title="Ajanların okuduğu metin (Markdown)">MD</button>` : ""}${area === "reports" && MD_EXT.test(f.name) ? `<a class="btn btn-sm" href="/api/files/reports/${encodeURIComponent(f.name)}/export?format=pdf" title="PDF sunum">PDF</a><a class="btn btn-sm" href="/api/files/reports/${encodeURIComponent(f.name)}/export?format=xlsx" title="Excel">XLS</a>` : ""}${area === "uploads" ? `<button class="btn btn-sm" data-note="${esc(f.name)}" title="Ajanlara not">✎</button>` : ""}<a class="btn btn-sm" href="${fileUrl(f.area, f.name, true)}" title="İndir">↓</a>
           <button class="btn btn-sm btn-danger" data-del="${esc(f.name)}" title="Sil">✕</button></div></div>`).join("") : `<div class="empty">Bu alanda dosya yok</div>`;
   };
   const load = async () => { items = await api(`/api/files/${area}`).catch((e) => (toast(e.message), [])); draw(); };
