@@ -42,6 +42,8 @@ const TOOL_LABEL = {
   virale_videos_list: "İçerikleri tarıyor", virale_videos_get: "İçerik ayrıntısı alıyor", virale_recommendations: "Öneri alıyor",
   virale_image_generate: "Görsel üretiyor", virale_carousel_generate: "Carousel üretiyor", virale_video_generate: "Video üretiyor",
   virale_generation_status: "Üretimi kontrol ediyor", virale_ai_balance: "Bakiyeyi kontrol ediyor",
+  design_image: "Tasarım çiziyor", make_video: "Video kurguluyor", compose_product: "Ürünü sahneye yerleştiriyor",
+  crop_product: "Ürünü dekupe ediyor", list_products: "Ürün kütüphanesine bakıyor", view_image: "Görseli inceliyor",
 };
 
 const ICONS = {
@@ -835,7 +837,7 @@ function pageGallery() {
     $(".lb-bar .lb-title").after(sel);
   });
   load();
-  return onLive((ev) => { if (ev.type === "tool" && ["save_media_from_url", "compose_product", "crop_product"].includes(ev.tool)) setTimeout(load, 3000); });
+  return onLive((ev) => { if (ev.type === "tool" && ["save_media_from_url", "compose_product", "crop_product", "design_image", "make_video"].includes(ev.tool)) setTimeout(load, 3000); });
 }
 
 function openLightbox(name, kind, onDelete) {

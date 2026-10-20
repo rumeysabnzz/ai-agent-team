@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import httpx
 
-from . import convert, folders, products, storage
+from . import convert, folders, products, storage, studio
 from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, TEAMS, WORKFLOW_BY_ID, WORKFLOWS
 
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
@@ -64,6 +64,7 @@ LONG_PROMPT_TOKENS = 100_000
 WEB_SEARCH_PRICE = 0.01  # $10 / 1000 arama
 GENERATE_TOOLS = {"virale_image_generate", "virale_carousel_generate", "virale_sequence_generate",
                   "virale_video_generate", "virale_multi_video_generate", "virale_video_montage_create"}
+VIRALE_GENERATION = os.getenv("VIRALE_GENERATION", "") == "1"   # varsayılan kapalı: Virale yalnız rakip analizi
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MCP_BETA = "mcp-client-2025-11-20"
 MAX_MEDIA_BYTES = 300 * 1024 * 1024
@@ -296,6 +297,34 @@ CUSTOM_TOOLS.update({
                                         "remove_boxes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
                                         "rotate": {"type": "number"}, "save": {"type": "boolean"},
                                         "primary": {"type": "boolean"}}},
+    },
+    "design_image": {
+        "description": "Sistem içi tasarım stüdyosu: yazdığın SVG'yi PNG/JPEG görsele çevirir ve galeriye kaydeder (ücretsiz). "
+                       "format: feed (1080×1350), square (1080×1080), story (1080×1920); SVG'nin width/height/viewBox değeri "
+                       "bu ölçüde olmalı. Ürün dekupesi ve yüklenen fotoğraflar için <image href=\"media:DOSYA\"> veya "
+                       "<image href=\"uploads:DOSYA\">; başka bağlantı açılmaz. Fontlar: " + studio.FONTS + ". "
+                       "transparent true ise zemin şeffaf PNG olur (video yazı katmanı için). Sonucun önizlemesi döner.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["svg", "format", "filename", "transparent"],
+                         "properties": {"svg": {"type": "string"}, "format": {"type": "string", "enum": list(studio.SIZES)},
+                                        "filename": {"type": "string"}, "transparent": {"type": "boolean"}}},
+    },
+    "make_video": {
+        "description": "Sistem içi video kurgusu (ffmpeg, ücretsiz): sahnelerden MP4 üretir ve galeriye kaydeder. Her sahne: image "
+                       "(galerideki kare, ör. design_image çıktısı; \"uploads:ad\" ile yüklenen fotoğraf), seconds (1.2–10), motion "
+                       "(still, zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down), overlay (şeffaf PNG yazı katmanı, yoksa \"\"), "
+                       "overlay_delay (yazının belirme saniyesi). transition: fade, dissolve, slideleft, slideup, circleopen, "
+                       "wipeleft, none. audio: uploads alanındaki müzik dosyası (yoksa \"\"). En fazla 12 sahne, 60 sn. "
+                       "Sonuçtan eşit aralıklı kareler döner.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["scenes", "format", "transition", "audio", "filename"],
+                         "properties": {"scenes": {"type": "array", "items": {
+                             "type": "object", "additionalProperties": False,
+                             "required": ["image", "seconds", "motion", "overlay", "overlay_delay"],
+                             "properties": {"image": {"type": "string"}, "seconds": {"type": "number"},
+                                            "motion": {"type": "string", "enum": list(studio.MOTIONS)},
+                                            "overlay": {"type": "string"}, "overlay_delay": {"type": "number"}}}},
+                             "format": {"type": "string", "enum": list(studio.SIZES)},
+                             "transition": {"type": "string", "enum": list(studio.TRANSITIONS)},
+                             "audio": {"type": "string"}, "filename": {"type": "string"}}},
     },
     "remove_product_image": {
         "description": "Ürün kütüphanesinden hatalı bir ürün görselini (ör. delikli, lekeli eski dekupe) kaldırır.",
@@ -562,6 +591,10 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
         names += [n for n in ("list_products", "product_reference") if n not in names]
     if agent.get("compose"):
         names.append("compose_product")
+    if agent.get("studio"):
+        names += ["design_image"]
+    if agent.get("video"):
+        names += ["make_video"]
     if agent.get("product_images") and "save_media_from_url" not in names:
         names.append("save_media_from_url")
     return names
@@ -693,6 +726,26 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
             report = "Önizleme (kaydedilmedi; beğenirsen save true ile tekrar çağır). " + report
         return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": preview}},
                 {"type": "text", "text": report}]
+    if name == "design_image":
+        res = await asyncio.to_thread(studio.design_to_media, args["svg"], args["format"], args["filename"], bool(args["transparent"]))
+        run.outputs.append({"type": "media", "name": res["name"]})
+        await folders.place([res["name"]], folders.folder_for_media(res["name"], agent, run, TZ))
+        await storage.log_activity(f"{agent['name']} tasarım üretti: {res['name']}", "media")
+        return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(res["preview"]).decode()}},
+                {"type": "text", "text": f"Kaydedildi: media/{res['name']} ({res['size'][0]}×{res['size'][1]}). Önizlemede taşan veya "
+                                         "kesilen yazı, okunmayan kontrast, ürünün boyutu ve hizası, boşluk dengesi var mı bak; "
+                                         "gerekirse SVG'yi düzeltip yeni adla tekrar üret (en fazla 2 düzeltme)."}]
+    if name == "make_video":
+        res = await studio.make_video(args["scenes"], args["format"], args["transition"], args["audio"], args["filename"])
+        run.outputs.append({"type": "media", "name": res["name"]})
+        await folders.place([res["name"]], folders.folder_for_media(res["name"], agent, run, TZ))
+        await storage.log_activity(f"{agent['name']} video kurguladı: {res['name']} ({res['seconds']} sn)", "media")
+        sheet = await asyncio.to_thread(studio.contact_sheet, storage.DATA_DIR / "media" / res["name"])
+        text = f"Kaydedildi: media/{res['name']} ({res['seconds']} sn, {res['size'][0]}×{res['size'][1]})."
+        if not sheet:
+            return text
+        return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(sheet).decode()}},
+                {"type": "text", "text": text + " Kareler soldan sağa zaman sırasıyla; akış ve okunabilirliği kontrol et."}]
     if name == "remove_product_image":
         item = await products.remove_image(args["product_id"], args["image"])
         return f"Kaldırıldı. Ürünün kalan görselleri: {', '.join(item['images']) or 'yok'}; ana görsel: {item.get('primary') or 'yok'}."
@@ -864,8 +917,10 @@ def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]],
         if VIRALE_MCP_TOKEN:
             server["authorization_token"] = VIRALE_MCP_TOKEN
         mcp_servers.append(server)
+        # Görsel/video üretimi sistem içinde yapılır; Virale'nin ücretli üretim araçları hiçbir ajana açılmaz
+        allowed = [n for n in agent["virale"] if n not in GENERATE_TOOLS or VIRALE_GENERATION]
         tools.append({"type": "mcp_toolset", "mcp_server_name": "virale", "default_config": {"enabled": False},
-                      "configs": {name: {"enabled": True} for name in agent["virale"]}})
+                      "configs": {name: {"enabled": True} for name in allowed}})
     return tools, mcp_servers
 
 
