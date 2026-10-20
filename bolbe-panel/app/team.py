@@ -36,7 +36,7 @@ VIRALE_VIDEO = ["virale_video_generate", "virale_multi_video_generate", "virale_
 # ---------------------------------------------------------------- ortak kurallar
 
 COMMON_RULES = """Genel kurallar:
-- Çıktıların Türkçe olsun. Marka profiline ve yasaklı ifadelere uy.
+- Çıktıların, ara notların ve düşünce özetlerin Türkçe olsun. Marka profiline ve yasaklı ifadelere uy.
 - Uydurma veri kullanma. Bir sayıyı bir kaynaktan (Virale, web araması, yüklenen dosya) almadıysan "tahmin" diye işaretle.
 - Önceki adımların çıktıları sana verilir; onların üzerine inşa et, tekrar etme.
 - İşin bitince son mesajında kısa bir özet ver: ne yaptın, ne ürettin, sırada ne var.

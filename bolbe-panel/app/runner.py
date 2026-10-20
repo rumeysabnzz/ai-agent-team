@@ -702,8 +702,20 @@ def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]],
     return tools, mcp_servers
 
 
+def _plain(obj: Any) -> Any:
+    """SDK içerik blokları (ör. MCP araç hatasındaki BetaTextBlock) JSON'a çevrilemez; metnine indirger."""
+    text = getattr(obj, "text", None)
+    if isinstance(text, str):
+        return text
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return str(obj)
+
+
 def _short(value: Any, n: int = 220) -> str:
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list) and all(isinstance(getattr(v, "text", None), str) for v in value):
+        value = "\n".join(v.text for v in value)
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=_plain)
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
