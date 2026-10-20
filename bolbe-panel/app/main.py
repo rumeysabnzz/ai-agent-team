@@ -288,9 +288,41 @@ async def file_export(area: str, name: str, format: str = "pdf") -> Response:
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"})
 
 
+THUMB_WIDTHS = (240, 480, 720, 1080, 1440)
+
+
+def _thumbnail(path: Path, width: int) -> Path:
+    """Görselin küçük WebP kopyası; telefonda galeri ve onay ekranı tam boy görseli indirmesin.
+    Önbellek dosya adı değişme zamanını içerir, dosya değişince yenisi üretilir."""
+    from PIL import Image, ImageOps
+
+    st = path.stat()
+    target = storage.DATA_DIR / "cache" / "thumbs" / str(width) / f"{path.parent.name}-{path.name}-{int(st.st_mtime)}.webp"
+    if target.is_file():
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(path) as img:
+        img = ImageOps.exif_transpose(img)
+        if img.width <= width and path.suffix.lower() == ".webp":
+            return path
+        img.thumbnail((width, width * 3))
+        img = img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB")
+        tmp = target.with_suffix(".tmp")
+        img.save(tmp, "WEBP", quality=80, method=4)
+        tmp.replace(target)
+    return target
+
+
 @app.get("/api/files/{area}/{name}", dependencies=auth)
-async def get_file(area: str, name: str, download: bool = False) -> FileResponse:
+async def get_file(area: str, name: str, download: bool = False, w: int = 0) -> FileResponse:
     path = storage.area_file(area, name)
+    if w and not download and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+        width = next((x for x in THUMB_WIDTHS if x >= w), THUMB_WIDTHS[-1])
+        try:
+            thumb = await asyncio.to_thread(_thumbnail, path, width)
+            return FileResponse(thumb, media_type="image/webp", headers={"Cache-Control": "private, max-age=604800"})
+        except Exception:  # noqa: BLE001 — küçültülemeyen görsel aslıyla verilir
+            logging.getLogger("panel").warning("Küçük görsel üretilemedi: %s", name, exc_info=True)
     # HTML ve SVG panel kökeninde çalıştırılmaz; her zaman indirme olarak verilir
     as_attachment = download or path.suffix.lower() in {".html", ".htm", ".svg"}
     return FileResponse(path, filename=path.name, content_disposition_type="attachment" if as_attachment else "inline")
@@ -392,6 +424,8 @@ async def put_file_note(name: str, body: FileNoteBody) -> dict[str, Any]:
 @app.delete("/api/files/{area}/{name}", dependencies=auth)
 async def delete_file(area: str, name: str) -> dict[str, Any]:
     storage.area_file(area, name).unlink()
+    for thumb in (storage.DATA_DIR / "cache" / "thumbs").glob(f"*/{area}-{name}-*.webp"):
+        thumb.unlink(missing_ok=True)
     if area == "media":
         await folders.forget(name)
     await storage.log_activity(f"Dosya silindi ({area}): {name}", "delete")

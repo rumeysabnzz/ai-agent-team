@@ -11,6 +11,25 @@ const fmtDate = (iso) => iso ? new Date(iso).toLocaleString("tr-TR", { day: "2-d
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
 const fmtUsd = (n) => `$${Number(n || 0).toFixed(2)}`;
 const fileUrl = (area, name, download = false) => `/api/files/${area}/${encodeURIComponent(name)}${download ? "?download=1" : ""}`;
+const IS_VIDEO = /\.(mp4|mov|webm|m4v)$/i;
+// Küçük önizleme: sunucu WebP küçük kopya üretir (telefonda tam boy görsel indirilmez)
+const thumbUrl = (area, name, w = 480) => `${fileUrl(area, name)}?w=${Math.round(w * Math.min(devicePixelRatio || 1, 2))}`;
+// Izgaralardaki görsel/video önizlemesi. Videolar ekrana girince yüklenir (lazyVideos).
+function mediaTile(name, kind, w = 480, attrs = "") {
+  kind = kind || (IS_VIDEO.test(name) ? "video" : "image");
+  return kind === "video"
+    ? `<video data-src="${fileUrl("media", name)}#t=0.1" preload="none" muted playsinline ${attrs}></video>`
+    : `<img src="${thumbUrl("media", name, w)}" loading="lazy" decoding="async" alt="" ${attrs}>`;
+}
+const videoObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries) => entries.forEach((e) => {
+  if (!e.isIntersecting) return;
+  const v = e.target; videoObserver.unobserve(v);
+  v.preload = "metadata"; v.src = v.dataset.src;
+}), { rootMargin: "200px" }) : null;
+function lazyVideos(root = document) {
+  $$("video[data-src]:not([src])", root).forEach((v) => (videoObserver ? videoObserver.observe(v) : (v.src = v.dataset.src)));
+}
+new MutationObserver(() => lazyVideos()).observe(document.body, { childList: true, subtree: true });
 const KIND_ICON = { image: "🖼", video: "🎬", audio: "🎧", text: "📄", pdf: "📕", other: "📦" };
 const ACT_COLOR = { upload: "var(--cyan)", report: "var(--brand)", run: "var(--purple)", done: "var(--green)", media: "var(--cyan)", approval: "var(--brand)", alert: "var(--red)", error: "var(--red)", delete: "var(--orange)", info: "var(--muted)" };
 const RUN_STATE = { queued: ["Sırada", "orange"], running: ["Çalışıyor", "cyan"], done: ["Tamamlandı", "green"], failed: ["Hata", "red"] };
@@ -289,6 +308,12 @@ async function startApp() {
   route();
 }
 
+// Canlı olaylar saniyede birkaç kez gelebilir; ekranı en fazla `ms` aralıkla yeniden çiz
+function throttle(fn, ms) {
+  let timer = null;
+  return () => { if (!timer) timer = setTimeout(() => { timer = null; fn(); }, ms); };
+}
+
 function onLive(fn) {
   const h = (e) => fn(e.detail);
   document.addEventListener("live", h);
@@ -349,10 +374,11 @@ function pageHome() {
   };
 
   drawFeed(); load();
+  const redraw = throttle(() => { updateAgentRows(); drawFeed(); }, 500);
+  const reload = throttle(load, 1500);
   const offLive = onLive((ev) => {
-    updateAgentRows();
-    if (ev.agent) drawFeed();
-    if (["run_end", "approval", "alert", "run_start"].includes(ev.type)) load();
+    redraw();
+    if (["run_end", "approval", "alert", "run_start"].includes(ev.type)) reload();
   });
   const timer = setInterval(load, 30000);
   const onResize = () => drawConnections();
@@ -552,12 +578,13 @@ function pageRun() {
     try { data = await api(`/api/runs/${id}`); draw(); } catch (ex) { view.innerHTML = `<div class="empty">${esc(ex.message)}</div>`; }
   };
   load();
+  const drawSoon = throttle(() => draw(), 400);
   return onLive((ev) => {
     if (ev.run_id !== id || !data) return;
     if (["run_end", "agent_done"].includes(ev.type)) return load();
     if (ev.type === "agent_start") data.current_agent = ev.agent;
     data.events.push(ev);
-    draw();
+    drawSoon();
   });
 }
 
@@ -593,8 +620,8 @@ function pageApprovals() {
         <div class="ap-head">${chip(i.kind, { reel: "orange", story: "purple", carousel: "cyan", "görsel": "green" }[i.kind] || "gold")}
           <span class="muted" style="font-size:.8rem">${esc(i.agent_name)} · ${fmtDate(i.created)}</span><h3><a class="ap-title" href="#/icerik?id=${i.id}">${esc(i.title)}</a></h3></div>
         ${i.media.length ? `<div class="ap-media">${i.media.map((m) => /\.(mp4|mov|webm|m4v)$/i.test(m)
-          ? `<video src="${fileUrl("media", m)}#t=0.5" preload="metadata" muted playsinline data-lb="${esc(m)}" data-k="video"></video>`
-          : `<img src="${fileUrl("media", m)}" loading="lazy" alt="${esc(m)}" data-lb="${esc(m)}" data-k="image">`).join("")}</div>` : ""}
+          ? mediaTile(m, "video", 320, `data-lb="${esc(m)}" data-k="video"`)
+          : mediaTile(m, "image", 320, `data-lb="${esc(m)}" data-k="image"`)).join("")}</div>` : ""}
         <div class="ap-body markdown">${renderMarkdown(i.body)}</div>
         ${i.note ? `<div class="ap-note">Not: ${esc(i.note)}</div>` : ""}
         ${revisionInfo(i)}
@@ -704,8 +731,7 @@ function pageGallery() {
   const selected = new Set();
   const folderId = () => params().get("f") || "";
   const folderName = (id) => id === "all" ? "Tüm medya" : id === "none" ? "Klasörsüz" : (data.folders.find((f) => f.id === id) || {}).name || "";
-  const thumb = (name, k) => k === "video" ? `<video preload="metadata" muted playsinline src="${fileUrl("media", name)}#t=0.5"></video>`
-    : name ? `<img loading="lazy" src="${fileUrl("media", name)}" alt="">` : `<span class="f-empty">📁</span>`;
+  const thumb = (name, k) => name ? mediaTile(name, k, 320) : `<span class="f-empty">📁</span>`;
   const folderOptions = (current) => [`<option value="">Klasörsüz</option>`, ...data.folders.map((f) =>
     `<option value="${f.id}" ${f.id === current ? "selected" : ""}>${esc(f.name)}</option>`)].join("");
 
@@ -820,8 +846,16 @@ function openLightbox(name, kind, onDelete) {
       <a class="btn btn-sm" href="${fileUrl("media", name, true)}">↓ İndir</a>
       ${onDelete ? `<button class="btn btn-sm btn-danger" id="lb-del">Sil</button>` : ""}
       <button class="btn btn-sm" id="lb-close" aria-label="Kapat">✕</button></div>
-    <div class="lb-body">${kind === "video" ? `<video src="${src}" controls autoplay playsinline></video>` : `<img src="${src}" alt="${esc(name)}">`}</div>`;
+    <div class="lb-body">${kind === "video" ? `<video src="${src}" controls autoplay playsinline preload="auto"></video>`
+      : `<img src="${thumbUrl("media", name, 320)}" alt="${esc(name)}" class="lb-img loading"><span class="spinner lb-spin"></span>`}</div>`;
   lb.hidden = false;
+  if (kind !== "video") {
+    const full = new Image(), side = Math.max(innerWidth, innerHeight);
+    full.decoding = "async";
+    full.onload = () => { const img = $(".lb-img", lb); if (img) { img.src = full.src; img.classList.remove("loading"); } $(".lb-spin", lb)?.remove(); };
+    full.onerror = () => { $(".lb-spin", lb)?.remove(); toast("Görsel yüklenemedi"); };
+    full.src = thumbUrl("media", name, side > 900 ? 1440 : 800);
+  }
   const close = () => { lb.hidden = true; lb.innerHTML = ""; document.removeEventListener("keydown", onKey); };
   const onKey = (e) => e.key === "Escape" && close();
   document.addEventListener("keydown", onKey);
@@ -1045,8 +1079,8 @@ function pageContentHistory() {
   const id = params().get("id");
   view.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
   const media = (list) => list.length ? `<div class="ap-media">${list.map((m) => /\.(mp4|mov|webm|m4v)$/i.test(m)
-    ? `<video src="${fileUrl("media", m)}#t=0.5" preload="metadata" muted playsinline data-lb="${esc(m)}" data-k="video"></video>`
-    : `<img src="${fileUrl("media", m)}" loading="lazy" alt="${esc(m)}" data-lb="${esc(m)}" data-k="image">`).join("")}</div>` : `<div class="muted hv-nomedia">Bu sürümde görsel/video yok</div>`;
+    ? mediaTile(m, "video", 320, `data-lb="${esc(m)}" data-k="video"`)
+    : mediaTile(m, "image", 320, `data-lb="${esc(m)}" data-k="image"`)).join("")}</div>` : `<div class="muted hv-nomedia">Bu sürümde görsel/video yok</div>`;
   const runLink = (r, label) => r ? `<a class="hv-run" href="#/calisma?id=${r.id}">${label}: <b>${esc(r.title)}</b> · ${fmtDate(r.created)} ${runChip(r.status)}</a>` : "";
   const load = async () => {
     const d = await api(`/api/approvals/${id}/history`).catch((e) => ({ error: e.message }));
@@ -1117,8 +1151,8 @@ function pageProducts() {
   const draw = () => {
     $("#pr-list").innerHTML = items.length ? items.map((p) => `
       <div class="card pr-card" data-id="${p.id}">
-        <div class="pr-img">${p.primary ? `<img src="${fileUrl("media", p.primary)}" alt="${esc(p.name)}" data-lb="${esc(p.primary)}" data-k="image">` : `<span class="muted">Görsel yok</span>`}</div>
-        ${p.images.length > 1 ? `<div class="pr-thumbs">${p.images.map((i) => `<img src="${fileUrl("media", i)}" class="${i === p.primary ? "on" : ""}" data-primary="${esc(i)}" title="Ana görsel yap">`).join("")}</div>` : ""}
+        <div class="pr-img">${p.primary ? `<img src="${thumbUrl("media", p.primary, 480)}" loading="lazy" decoding="async" alt="${esc(p.name)}" data-lb="${esc(p.primary)}" data-k="image">` : `<span class="muted">Görsel yok</span>`}</div>
+        ${p.images.length > 1 ? `<div class="pr-thumbs">${p.images.map((i) => `<img src="${thumbUrl("media", i, 120)}" loading="lazy" class="${i === p.primary ? "on" : ""}" data-primary="${esc(i)}" title="Ana görsel yap">`).join("")}</div>` : ""}
         <h3>${esc(p.name)}</h3>
         <div class="pr-chips">${[p.category, p.size, p.price].filter(Boolean).map((x) => chip(x, "gray")).join("")}</div>
         ${(p.colors || []).length ? `<div class="pr-colors">${p.colors.map((c) => `<span style="background:${esc(c)}" title="${esc(c)}"></span>`).join("")}<small>${p.colors.map(esc).join(" · ")}</small></div>` : ""}
@@ -1254,8 +1288,8 @@ function pageCalendar() {
       section("⟳ Çalıştırmalar", d.runs, runRow),
       section("▤ Raporlar", d.reports, (f) => `<a class="day-item" href="#/raporlar?r=${encodeURIComponent(f.name)}">${KIND_ICON[f.kind] || "📄"} ${esc(f.name)}<small>${fmtTime(f.modified)}</small></a>`),
       d.media.length ? `<div class="day-sec"><div class="card-title">▣ Görsel ve videolar <span class="muted">(${d.media.length})</span></div><div class="day-media">${d.media.map((f) => f.kind === "video"
-        ? `<video src="${fileUrl("media", f.name)}#t=0.5" preload="metadata" muted playsinline data-lb="${esc(f.name)}" data-k="video"></video>`
-        : f.kind === "image" ? `<img src="${fileUrl("media", f.name)}" loading="lazy" alt="${esc(f.name)}" data-lb="${esc(f.name)}" data-k="image">` : "").join("")}</div></div>` : "",
+        ? mediaTile(f.name, "video", 320, `data-lb="${esc(f.name)}" data-k="video"`)
+        : f.kind === "image" ? mediaTile(f.name, "image", 320, `data-lb="${esc(f.name)}" data-k="image"`) : "").join("")}</div></div>` : "",
       section("✓ Onaya gönderilenler", d.approvals, (a) => `<a class="day-item" href="#/onay">${chip(a.kind, "gray")} ${esc(a.title)}<small>${esc(a.agent_name)} · ${{ pending: "bekliyor", approved: "onaylandı", revision: "revizede", rejected: "reddedildi" }[a.status] || a.status}</small></a>`),
       section("⚠ Uyarılar", d.alerts, alertRow),
       section("🗂 Aktivite", d.activity, (a) => `<div class="log-entry"><span class="log-time">${fmtTime(a.time)}</span><span class="log-dot" style="background:${ACT_COLOR[a.kind] || ACT_COLOR.info}"></span><span class="log-msg">${esc(a.message)}</span></div>`),
@@ -1336,7 +1370,7 @@ function pageDevelopment() {
   $("#dev-run").addEventListener("click", async () => {
     try { const r = await sendJSON("POST", "/api/workflows/haftalik-yonetim/run", { note: "" }); location.hash = `#/calisma?id=${r.id}`; } catch (ex) { toast(ex.message); }
   });
-  const off = onLive(() => data && draw());
+  const off = onLive(throttle(() => data && draw(), 1000));
   load();
   return off;
 }
@@ -1345,7 +1379,8 @@ function pageDevelopment() {
 
 (function particles() {
   const canvas = $("#particles"), ctx = canvas.getContext("2d");
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  // Telefonda kapalı: her karede çizim cam yüzeylerin de her karede yeniden bulanıklaştırılmasına yol açıyor
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || PHONE_MQ.matches || matchMedia("(pointer: coarse)").matches) { canvas.remove(); return; }
   let w, h, dots, rgb, alpha;
   const readColors = () => {
     const cs = getComputedStyle(document.documentElement);
@@ -1353,19 +1388,22 @@ function pageDevelopment() {
     alpha = parseFloat(cs.getPropertyValue("--particle-alpha")) || 0.3;
   };
   const resize = () => {
-    w = canvas.width = innerWidth * devicePixelRatio; h = canvas.height = innerHeight * devicePixelRatio;
+    if (w === innerWidth && h === innerHeight) return;
+    w = canvas.width = innerWidth; h = canvas.height = innerHeight;
     readColors();
     const light = document.documentElement.dataset.theme !== "dark";
     const n = Math.min(light ? 45 : 70, Math.round((innerWidth * innerHeight) / (light ? 32000 : 22000)));
     dots = Array.from({ length: n }, () => ({ x: Math.random() * w, y: Math.random() * h, vx: (Math.random() - 0.5) * 0.25, vy: (Math.random() - 0.5) * 0.25, r: Math.random() * 1.6 + 0.4 }));
   };
-  const tick = () => {
-    if (document.hidden) return requestAnimationFrame(tick);
+  let last = 0;
+  const tick = (now = 0) => {
+    if (document.hidden || now - last < 33) return requestAnimationFrame(tick);   // en fazla 30 fps
+    last = now;
     ctx.clearRect(0, 0, w, h);
-    const link = 120 * devicePixelRatio;
+    const link = 120;
     for (const d of dots) {
       d.x = (d.x + d.vx + w) % w; d.y = (d.y + d.vy + h) % h;
-      ctx.beginPath(); ctx.arc(d.x, d.y, d.r * devicePixelRatio, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${rgb},${alpha})`; ctx.fill();
     }
     for (let i = 0; i < dots.length; i++) for (let j = i + 1; j < dots.length; j++) {
@@ -1374,7 +1412,7 @@ function pageDevelopment() {
     }
     requestAnimationFrame(tick);
   };
-  addEventListener("resize", resize); addEventListener("themechange", resize); resize(); tick();
+  addEventListener("resize", resize); addEventListener("themechange", () => { w = 0; resize(); }); resize(); tick();
 })();
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});

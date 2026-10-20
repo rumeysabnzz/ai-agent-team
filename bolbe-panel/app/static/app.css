@@ -80,7 +80,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .card,.stat-item,.f-card,.login-card,.node-inner,.org-node{border-color:var(--glass-edge)!important;
   box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.35)}
 :root[data-theme="dark"] .card,:root[data-theme="dark"] .stat-item,:root[data-theme="dark"] .f-card{box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.06)}
-.cal-pop,.lightbox .lb-bar{background:var(--surface-solid)}
+.cal-pop{background:var(--surface-solid)}
 
 /* ---------- üst çubuk ---------- */
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:10px 22px;padding-top:max(10px,env(safe-area-inset-top));background:var(--topbar);border-bottom:1px solid var(--glass-edge)}
@@ -273,7 +273,8 @@ label{font-size:0.89rem;color:var(--muted)}
 
 /* ---------- onay ---------- */
 .approval-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
-.ap-card{display:flex;flex-direction:column;gap:10px}
+.ap-card{display:flex;flex-direction:column;gap:10px;min-width:0}
+.approval-grid>*{min-width:0}
 .ap-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .ap-head h3{font-size:1rem;flex-basis:100%}
 .ap-media{display:flex;gap:6px;overflow-x:auto;scroll-snap-type:x mandatory}
@@ -332,7 +333,7 @@ pre.markdown{white-space:pre-wrap}
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
 .g-item{position:relative;border-radius:14px;overflow:hidden;background:var(--surface-3);border:1px solid var(--line);aspect-ratio:1;cursor:pointer;padding:0;box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s}
 .g-item:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift)}
-.g-item img,.g-item video{width:100%;height:100%;object-fit:cover;display:block}
+.g-item img,.g-item video{width:100%;height:100%;object-fit:cover;display:block;background:var(--surface-3)}
 .g-item .g-badge{position:absolute;top:8px;left:8px}
 .gal-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .gal-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
@@ -364,7 +365,10 @@ pre.markdown{white-space:pre-wrap}
 .lb-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .lb-bar .lb-title{flex:1;font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lb-body{flex:1;display:grid;place-items:center;min-height:0}
-.lb-body img,.lb-body video{max-width:100%;max-height:100%;border-radius:10px}
+.lb-body{position:relative;display:flex!important;align-items:center;justify-content:center;overflow:hidden}
+.lb-body img,.lb-body video{max-width:100%;max-height:calc(100dvh - 140px);width:auto;height:auto;object-fit:contain;border-radius:10px}
+.lb-img.loading{filter:blur(6px);min-width:60vw;object-fit:contain}
+.lb-spin{position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-width:3px}
 
 /* ---------- ayarlar ---------- */
 .comp-row{display:grid;grid-template-columns:1.3fr 1fr .7fr auto;gap:8px;margin-bottom:8px}
@@ -536,7 +540,15 @@ pre.markdown{white-space:pre-wrap}
 }
 @media (max-width:720px),(pointer:coarse) and (max-height:520px){
   .container{padding:14px 14px calc(var(--nav-h) + 34px + env(safe-area-inset-bottom))}
-  :root{--blur:saturate(160%) blur(12px)}
+  /* performans: kartlarda cam bulanıklığı yok (daha opak yüzey), yalnız üst ve alt çubuk bulanık;
+     sürekli dönen/parlayan süsler kapalı; ekran dışındaki kartlar çizilmez */
+  :root{--blur:saturate(150%) blur(10px);--surface:rgba(255,255,255,.88);--surface-2:rgba(255,255,255,.7)}
+  :root[data-theme="dark"]{--surface:rgba(30,22,44,.92);--surface-2:rgba(255,255,255,.07)}
+  .card,.stat-item,.f-card,.login-card,.node-inner,.org-node,.sel-bar,.md-sheet,.subnav .seg,.toast{-webkit-backdrop-filter:none;backdrop-filter:none}
+  .brand-mark,.hub-ring,.node-card.busy,.pill.live .dot{animation:none!important}
+  body::before{inset:0}
+  .ap-card,.g-item,.f-card,.wf-card,.pr-card{content-visibility:auto;contain-intrinsic-size:auto 320px}
+  .card:hover,.stat-item:hover,.f-card:hover,.g-item:hover{transform:none}
   /* telefon: üstte marka ve kısayollar, altta 4 bölümlük yüzen cam sekme çubuğu */
   .topbar{padding:8px 14px;padding-top:max(8px,env(safe-area-inset-top));gap:8px}
   .topbar-sub,.nav,#logout{display:none}
@@ -552,7 +564,7 @@ pre.markdown{white-space:pre-wrap}
     border-radius:16px;text-decoration:none;color:var(--muted);font-size:.74rem;font-weight:700;transition:background .2s,color .2s}
   .tabbar a .ico{width:23px;height:23px}
   .tabbar a.active{color:#fff;background:var(--btn-grad);box-shadow:0 6px 16px rgba(var(--btn-glow),.35)}
-  .tabbar .nav-badge{top:2px;right:calc(50% - 22px)}
+  .tabbar .nav-badge{top:1px;right:calc(50% - 30px)}
   .cal-pop{position:fixed;left:12px;right:12px;top:calc(60px + env(safe-area-inset-top));width:auto}
   /* kompakt sayfa başı: açıklamalar gizli, eylem düğmeleri yan yana */
   .page-desc{display:none}
