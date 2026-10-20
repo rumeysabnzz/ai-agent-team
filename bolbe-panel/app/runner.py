@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import httpx
 
-from . import convert, storage
+from . import convert, products, storage
 from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, TEAMS, WORKFLOW_BY_ID, WORKFLOWS
 
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
@@ -46,17 +46,17 @@ MODELS: dict[str, dict[str, Any]] = {
         "label": "Haiku 5.5", "note": "en ucuz, veri toplama ve araç kullanımı",
         "price": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
         "long_price": {"input": 0.50, "output": 2.50, "cache_read": 0.05, "cache_write": 0.625},
-        "fallback": False, "web_search": "web_search_20250305",
+        "fallback": False, "web_search": "web_search_20250305", "web_fetch": None,
     },
     "claude-sonnet-5-5": {
         "label": "Sonnet 5.5", "note": "dengeli, analiz ve metin",
         "price": {"input": 2.0, "output": 10.0, "cache_read": 0.20, "cache_write": 2.5},
-        "fallback": True, "web_search": "web_search_20260209",
+        "fallback": True, "web_search": "web_search_20260209", "web_fetch": "web_fetch_20260209",
     },
     "claude-opus-5-5": {
         "label": "Opus 5.5", "note": "en güçlü, en pahalı",
         "price": {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0},
-        "fallback": True, "web_search": "web_search_20260209",
+        "fallback": True, "web_search": "web_search_20260209", "web_fetch": "web_fetch_20260209",
     },
 }
 LONG_PROMPT_TOKENS = 100_000
@@ -262,7 +262,43 @@ CUSTOM_TOOLS.update({
                          "properties": {"query": {"type": "string"}}},
     },
 })
+CUSTOM_TOOLS.update({
+    "list_products": {
+        "description": "BOLBÉ ürün kütüphanesindeki ürünleri kimlik kartlarıyla listeler (ad, kategori, hacim, renkler, ambalaj, etiket yazısı, referans görseller).",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": [], "properties": {}},
+    },
+    "product_reference": {
+        "description": "Bir ürünün kimlik kartını ve Virale'ye referans olarak verilecek herkese açık, süreli görsel bağlantılarını döndürür.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["product_id"],
+                         "properties": {"product_id": {"type": "string"}}},
+    },
+    "extract_pdf_images": {
+        "description": "uploads alanındaki bir PDF katalogdaki gömülü görselleri ayrı PNG dosyaları olarak uploads alanına çıkarır ve adlarını döndürür.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["name"],
+                         "properties": {"name": {"type": "string"}}},
+    },
+    "crop_product": {
+        "description": "Bir görselden ürünü kırpar, istenirse düz zemini şeffaf yapar, ürün kütüphanesine referans görsel olarak ekler. "
+                       "box = [x0, y0, x1, y1], görselin genişlik ve yüksekliğine göre 0–1 arası oranlar.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "required": ["area", "name", "box", "product_name", "clean_background", "primary"],
+                         "properties": {"area": {"type": "string", "enum": ["uploads", "media"]}, "name": {"type": "string"},
+                                        "box": {"type": "array", "items": {"type": "number"}},
+                                        "product_name": {"type": "string"}, "clean_background": {"type": "boolean"},
+                                        "primary": {"type": "boolean"}}},
+    },
+    "save_product": {
+        "description": "Ürün kimlik kartını oluşturur veya günceller (ada göre eşleşir). Bilinmeyen alanları boş bırak.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "required": ["name", "category", "size", "price", "colors", "packaging", "label_text", "key_ingredients", "description"],
+                         "properties": {"name": {"type": "string"}, "category": {"type": "string"}, "size": {"type": "string"},
+                                        "price": {"type": "string"}, "colors": {"type": "array", "items": {"type": "string"}},
+                                        "packaging": {"type": "string"}, "label_text": {"type": "string"},
+                                        "key_ingredients": {"type": "string"}, "description": {"type": "string"}}},
+    },
+})
 BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson", "view_image", "search_archive"]
+LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "save_product", "list_products"]
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 MAX_IMAGE_BYTES = 3_500_000
 MANAGER_TOOLS = ["list_lessons", "remove_lesson", "add_knowledge", "team_activity"]
@@ -457,6 +493,12 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
         names += MANAGER_TOOLS
     if "virale_generation_status" in agent.get("virale", []):
         names.append("wait")
+    if agent.get("library"):
+        names += LIBRARY_TOOLS
+    if agent.get("products_read"):
+        names += [n for n in ("list_products", "product_reference") if n not in names]
+    if agent.get("product_images") and "save_media_from_url" not in names:
+        names.append("save_media_from_url")
     return names
 
 
@@ -547,6 +589,30 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         bus.publish({"type": "approval", "item": {k: item[k] for k in ("id", "kind", "title", "agent_name")}})
         missing = set(args.get("media", [])) - set(media)
         return f"Onaya gönderildi (kimlik {item['id']})." + (f" Bulunamayan medya: {', '.join(missing)}" if missing else "")
+    if name == "list_products":
+        items = products.all_products()
+        return json.dumps(items, ensure_ascii=False) if items else "Ürün kütüphanesi boş. Ürün görseli kullanma; Kurucudan ürün fotoğrafı yüklemesini iste."
+    if name == "product_reference":
+        return json.dumps(products.reference(args["product_id"]), ensure_ascii=False)
+    if name == "extract_pdf_images":
+        saved = await asyncio.to_thread(products.extract_pdf_images, args["name"])
+        await storage.log_activity(f"{agent['name']} katalogdan {len(saved)} görsel çıkardı: {args['name']}", "upload")
+        return json.dumps({"cikarilan": saved}, ensure_ascii=False) if saved else "PDF'te yeterli boyutta görsel bulunamadı."
+    if name == "crop_product":
+        box = args["box"]
+        if len(box) != 4:
+            raise ValueError("box dört sayı olmalı: [x0, y0, x1, y1]")
+        media_name, colors = await asyncio.to_thread(products.crop_to_library, args["area"], args["name"], box,
+                                                     args["product_name"], bool(args["clean_background"]))
+        existing = next((p for p in products.all_products() if storage.slug(p["name"]) == storage.slug(args["product_name"])), None)
+        item = await products.save({"name": args["product_name"], **({} if existing and existing.get("colors") else {"colors": colors})}, agent["name"])
+        await products.add_image(item["id"], media_name, bool(args["primary"]))
+        run.outputs.append({"type": "media", "name": media_name})
+        await storage.log_activity(f"Ürün kütüphanesine görsel eklendi: {args['product_name']}", "media")
+        return f"Kaydedildi: media/{media_name} (ürün {item['id']}). Algılanan renkler: {', '.join(colors)}. view_image ile kontrol et."
+    if name == "save_product":
+        item = await products.save({k: args.get(k) for k in products.FIELDS}, agent["name"])
+        return f"Ürün kaydedildi: {item['id']} · {item['name']}"
     if name == "wait":
         seconds = max(10, min(int(args["seconds"]), 120))
         run.emit("agent_note", agent=agent["id"], text=f"Üretimin bitmesi için {seconds} sn bekliyor")
@@ -679,6 +745,10 @@ def _memory_prompt(agent: dict[str, Any]) -> str:
         parts.append("## Takım bilgi bankası (dış kaynaklı notlar)\n"
                      + "\n".join(f"- **{n['title']}**: {n['text']}" + (f" [{n['source_url']}]" if n["source_url"] else "")
                                   for n in notes)[:4000])
+    if agent.get("products_read") or agent.get("library"):
+        summary = products.summary_for_prompt()
+        parts.append("## BOLBÉ ürün kütüphanesi (ayrıntı: list_products / product_reference)\n"
+                     + (summary or "Kütüphane henüz boş."))
     parts.append(_archive_prompt(agent))
     parts.append("İşin sonunda, gelecekte işine yarayacak yeni bir ders çıkardıysan add_lesson ile kendi hafızana en fazla 1 kısa ders ekle.")
     return "\n\n".join(parts)
@@ -691,6 +761,8 @@ def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]],
     ]
     if agent.get("web"):
         tools.append({"type": MODELS[model]["web_search"], "name": "web_search", "max_uses": 8})
+    if agent.get("fetch") and MODELS[model]["web_fetch"]:
+        tools.append({"type": MODELS[model]["web_fetch"], "name": "web_fetch", "max_uses": 10})
     mcp_servers: list[dict[str, Any]] = []
     if agent.get("virale") and VIRALE_MCP_URL:
         server = {"type": "url", "url": VIRALE_MCP_URL, "name": "virale"}
@@ -886,7 +958,7 @@ def start_revision(item: dict[str, Any], steps: list[str], prompt: str) -> Run:
 
 
 def _due(schedule: dict[str, Any], last: str | None, now: datetime) -> bool:
-    if last == now.strftime("%Y-%m-%d"):
+    if schedule["kind"] == "manual" or last == now.strftime("%Y-%m-%d"):
         return False
     if (now.hour, now.minute) < (schedule["hour"], schedule["minute"]):
         return False
@@ -898,6 +970,8 @@ def _due(schedule: dict[str, Any], last: str | None, now: datetime) -> bool:
 
 
 def next_run_label(schedule: dict[str, Any]) -> str:
+    if schedule["kind"] == "manual":
+        return "Elle çalıştırılır"
     days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
     t = f"{schedule['hour']:02d}:{schedule['minute']:02d}"
     return f"Her {days[schedule['weekday']]} {t}" if schedule["kind"] == "weekly" else f"Her ayın {schedule['day']}. günü {t}"

@@ -71,6 +71,10 @@ def parse(markdown: str, fallback_title: str) -> Doc:
         elif re.match(r"^(-{3,}|\*{3,}|_{3,})$", s):
             flush()
             blocks.append(Block("hr"))
+        elif IMG_LINE.fullmatch(s):
+            flush()
+            found = IMG_RE.findall(s)
+            blocks.append(Block("img", " · ".join(a for a, _ in found if a), items=[src for _, src in found]))
         elif s.startswith("|") and s.endswith("|") and len(s) > 1:
             flush()
             if re.match(r"^\|?[\s:|-]+\|?$", s) and "-" in s:
@@ -117,13 +121,50 @@ def parse(markdown: str, fallback_title: str) -> Doc:
     return Doc(plain(title), plain(subtitle), blocks, intro)
 
 
+IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+IMG_LINE = re.compile(r"(?:\s*!\[[^\]]*\]\([^)\s]+\)\s*)+")
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def image_path(src: str) -> Path | None:
+    """Rapordaki görsel adresini diskteki dosyaya çevirir: media:ad, /api/files/media/ad veya media/ad."""
+    from urllib.parse import unquote
+
+    m = re.match(r"^(?:media:|/api/files/media/|media/)(.+)$", unquote(src))
+    if not m:
+        return None
+    path = Path(os.getenv("DATA_DIR", "/data")) / "media" / Path(m.group(1)).name
+    return path if path.is_file() and path.suffix.lower() in IMAGE_EXT else None
+
+
+def cell_image(cell: str) -> tuple[str, Path | None] | None:
+    m = IMG_RE.search(cell)
+    return (m.group(1), image_path(m.group(2))) if m else None
+
+
+def thumb(path: Path, max_px: int) -> tuple[io.BytesIO, int, int]:
+    """Görseli PNG'ye çevirip küçültür; (veri, genişlik, yükseklik)."""
+    from PIL import Image as PILImage
+
+    img = PILImage.open(path)
+    img.load()
+    img = img.convert("RGBA") if img.mode in ("RGBA", "LA", "P") else img.convert("RGB")
+    img.thumbnail((max_px, max_px))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    buf.seek(0)
+    return buf, img.width, img.height
+
+
 def plain(text: str) -> str:
+    text = IMG_RE.sub(r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", text)
     return re.sub(r"\*\*(.+?)\*\*|__(.+?)__|`([^`]+)`|\*(.+?)\*", lambda m: next(g for g in m.groups() if g), text).strip()
 
 
 def runs(text: str) -> list[tuple[str, bool]]:
     """Satır içi metni (parça, kalın mı) listesine böler."""
+    text = IMG_RE.sub(r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     out: list[tuple[str, bool]] = []
@@ -176,6 +217,7 @@ def to_pdf(doc: Doc) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
+    from reportlab.platypus import Image as RLImage
     from reportlab.platypus import (BaseDocTemplate, Frame, ListFlowable, ListItem, NextPageTemplate,
                                     PageBreak, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
@@ -228,14 +270,27 @@ def to_pdf(doc: Doc) -> bytes:
                           pageTemplates=[PageTemplate("cover", [cover_frame], onPage=cover),
                                          PageTemplate("slide", [frame], onPage=chrome)])
 
+    def picture(path: Path, max_w: float, max_h: float):
+        data, w, h = thumb(path, 900)
+        scale = min(max_w / w, max_h / h)
+        return RLImage(data, width=w * scale, height=h * scale)
+
     def table(rows: list[list[str]]):
         width = max(len(r) for r in rows)
         rows = [r + [""] * (width - len(r)) for r in rows]
-        data = [[Paragraph(_rl(c), st["head"] if i == 0 else st["cell"]) for c in r] for i, r in enumerate(rows)]
         avail = W - 2 * margin
-        lens = [max(len(plain(r[c])) for r in rows) + 4 for c in range(width)]
+        lens = [max(14 if cell_image(r[c]) and i else len(plain(r[c])) for i, r in enumerate(rows)) + 4 for c in range(width)]
         total = sum(min(x, 60) for x in lens)
-        t = Table(data, colWidths=[avail * min(x, 60) / total for x in lens], repeatRows=1)
+        widths = [avail * min(x, 60) / total for x in lens]
+
+        def cell(text: str, i: int, c: int):
+            img = cell_image(text) if i else None
+            if img and img[1]:
+                return picture(img[1], widths[c] - 10, 32 * mm)
+            return Paragraph(_rl(text), st["head"] if i == 0 else st["cell"])
+
+        data = [[cell(c, i, j) for j, c in enumerate(r)] for i, r in enumerate(rows)]
+        t = Table(data, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), brand),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F5F0")]),
@@ -267,6 +322,13 @@ def to_pdf(doc: Doc) -> bytes:
                                           bulletFontName=font, bulletColor=brand, leftIndent=14))
             elif b.kind == "table":
                 story += [table(b.rows), Spacer(1, 10)]
+            elif b.kind == "img":
+                pics = [picture(p, (W - 2 * margin) / max(1, len(b.items)) - 12, 70 * mm)
+                        for p in (image_path(src) for src in b.items) if p]
+                if pics:
+                    story += [Table([pics], hAlign="LEFT"), Spacer(1, 4)]
+                if b.text:
+                    story.append(Paragraph(html.escape(b.text), st["quote"]))
             elif b.kind == "hr":
                 story.append(Spacer(1, 10))
     if isinstance(story[-1], PageBreak):
@@ -281,6 +343,7 @@ def to_pdf(doc: Doc) -> bytes:
 def to_xlsx(doc: Doc) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.drawing.image import Image as XLImage
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
@@ -314,6 +377,16 @@ def to_xlsx(doc: Doc) -> bytes:
             tables.append((current, b.rows))
             ws.append([f"→ Tablo {len(tables)}: ayrı sayfada ('T{len(tables)} …')"])
             ws.cell(ws.max_row, 1).font = Font(italic=True, color=MUTED)
+        elif b.kind == "img":
+            paths = [p for p in (image_path(src) for src in b.items) if p]
+            ws.append([b.text or "Görsel"])
+            row = ws.max_row + 1
+            for k, p in enumerate(paths):
+                data, _, _ = thumb(p, 220)
+                pic = XLImage(data)
+                ws.add_image(pic, f"A{row}" if k == 0 else f"{get_column_letter(1)}{row + 12 * k}")
+            for _ in range(12 * max(1, len(paths))):
+                ws.append([])
     used: set[str] = {"Rapor"}
     for n, (name, rows) in enumerate(tables, 1):
         title = re.sub(r"[\[\]:*?/\\]", "", f"T{n} {name}")[:31].strip() or f"T{n}"
@@ -324,6 +397,13 @@ def to_xlsx(doc: Doc) -> bytes:
         width = max(len(r) for r in rows)
         for i, row in enumerate(rows):
             t.append([plain(c) if i == 0 else _number(c) for c in row] + [""] * (width - len(row)))
+            for c, value in enumerate(row):
+                img = cell_image(value) if i else None
+                if img and img[1]:
+                    data, _, h = thumb(img[1], 110)
+                    t.add_image(XLImage(data), f"{get_column_letter(c + 1)}{i + 1}")
+                    t.row_dimensions[i + 1].height = max(t.row_dimensions[i + 1].height or 15, h * 0.78 + 6)
+                    t.cell(i + 1, c + 1).value = ""
         for c in t[1]:
             c.font, c.fill, c.alignment = Font(bold=True, color="FFFFFF"), head_fill, wrap
         for row in t.iter_rows(min_row=2):
@@ -331,7 +411,8 @@ def to_xlsx(doc: Doc) -> bytes:
                 c.border, c.alignment = thin, wrap
         for col in range(1, width + 1):
             longest = max(len(str(t.cell(r, col).value or "")) for r in range(1, t.max_row + 1))
-            t.column_dimensions[get_column_letter(col)].width = min(max(10, longest + 2), 60)
+            has_img = any(cell_image(r[col - 1]) for r in rows[1:] if col - 1 < len(r))
+            t.column_dimensions[get_column_letter(col)].width = 17 if has_img else min(max(10, longest + 2), 60)
         t.freeze_panes = "A2"
         t.auto_filter.ref = t.dimensions
     buf = io.BytesIO()
@@ -422,10 +503,48 @@ def to_pptx(doc: Doc) -> bytes:
                         cell.fill.solid(); cell.fill.fore_color.rgb = brand
         return slide, len(part)
 
+    def add_picture(slide, path: Path, x: float, y: float, max_w: float, max_h: float) -> None:
+        data, w, h = thumb(path, 1200)
+        scale = min(max_w / w, max_h / h)
+        slide.shapes.add_picture(data, Inches(x), Inches(y), Inches(w * scale), Inches(h * scale))
+
+    def card_slides(title: str, rows: list[list[str]]) -> None:
+        """Görselli tabloyu satır başına bir kart slaytına çevirir: görseller solda, bilgiler sağda."""
+        head = rows[0]
+        for row in rows[1:]:
+            pics = [(head[c] if c < len(head) else "", cell_image(v)[1]) for c, v in enumerate(row) if cell_image(v)]
+            pics = [(h, p) for h, p in pics if p]
+            fields = [(head[c] if c < len(head) else "", v) for c, v in enumerate(row) if not cell_image(v) and plain(v)]
+            name = plain(fields[0][1]) if fields else title
+            s = new_slide(f"{title} · {name}" if title else name)
+            for k, (label, path) in enumerate(pics[:2]):
+                add_picture(s, path, 0.6 + k * 3.3, 1.4, 3.0, 4.2)
+                cap = textbox(s, 0.6 + k * 3.3, 5.7, 3.0, 0.4).paragraphs[0]
+                add_runs(cap, plain(label), 12, muted)
+            tf = textbox(s, 7.3 if pics else 0.7, 1.4, 5.4 if pics else 11.9, 5.4)
+            for i, (label, value) in enumerate(fields):
+                p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+                p.space_after = Pt(6)
+                add_runs(p, f"**{plain(label)}:** {value}", 15, ink)
+
     for title, blocks in sections(doc):
         lines: list[tuple[str, str]] = []
         last_table = None   # (slide, satır sayısı): tablodan sonra gelen kısa metin altına yazılır
         for b in blocks:
+            if b.kind == "img":
+                text_slides(title, lines)
+                lines = []
+                paths = [p for p in (image_path(src) for src in b.items) if p]
+                if paths:
+                    s = new_slide(title)
+                    for k, path in enumerate(paths[:3]):
+                        add_picture(s, path, 0.6 + k * 4.1, 1.4, 3.9, 5.2)
+                continue
+            if b.kind == "table" and any(cell_image(c) for r in b.rows[1:] for c in r):
+                text_slides(title, lines)
+                lines = []
+                card_slides(title, b.rows)
+                continue
             if b.kind == "table":
                 lead = lines if 0 < len(lines) <= 2 else []
                 if not lead:
@@ -456,7 +575,7 @@ def to_pptx(doc: Doc) -> bytes:
 
 def to_docx(doc: Doc) -> bytes:
     from docx import Document
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Cm, Pt, RGBColor
 
     d = Document()
     d.styles["Normal"].font.name = "Calibri"
@@ -487,11 +606,23 @@ def to_docx(doc: Doc) -> bytes:
             for r, row in enumerate(b.rows):
                 for c in range(width):
                     p = t.cell(r, c).paragraphs[0]
+                    img = cell_image(row[c]) if r and c < len(row) else None
+                    if img and img[1]:
+                        p.add_run().add_picture(thumb(img[1], 600)[0], height=Cm(2.6))
+                        continue
                     fill(p, row[c] if c < len(row) else "")
                     if r == 0:
                         for run in p.runs:
                             run.bold = True
             d.add_paragraph()
+        elif b.kind == "img":
+            p = d.add_paragraph()
+            for path in (image_path(src) for src in b.items):
+                if path:
+                    p.add_run().add_picture(thumb(path, 900)[0], width=Cm(6))
+                    p.add_run("  ")
+            if b.text:
+                d.add_paragraph().add_run(b.text).italic = True
         elif b.kind == "hr":
             d.add_paragraph()
     for h in d.paragraphs:
@@ -521,8 +652,21 @@ blockquote{{color:#{MUTED};border-left:3px solid #{BRAND};margin:0;padding-left:
     return page.encode()
 
 
+def _img_tag(src: str, alt: str, max_px: int) -> str:
+    import base64
+
+    path = image_path(src)
+    if not path:
+        return html.escape(alt)
+    data = base64.b64encode(thumb(path, max_px)[0].getvalue()).decode()
+    return f'<img src="data:image/png;base64,{data}" alt="{html.escape(alt)}" style="max-width:100%;max-height:{max_px}px">'
+
+
 def _md_to_html(doc: Doc) -> str:
     def inline(text: str) -> str:
+        img = cell_image(text)
+        if img:
+            return _img_tag(IMG_RE.search(text).group(2), img[0], 180)
         return "".join(f"<b>{html.escape(t)}</b>" if b else html.escape(t) for t, b in runs(text))
 
     out = []
@@ -540,6 +684,8 @@ def _md_to_html(doc: Doc) -> str:
             head, *body = b.rows
             out.append("<table><thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head) + "</tr></thead><tbody>"
                        + "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in body) + "</tbody></table>")
+        elif b.kind == "img":
+            out.append("<p>" + " ".join(_img_tag(src, b.text, 420) for src in b.items) + "</p>")
         elif b.kind == "hr":
             out.append("<hr>")
     return "\n".join(out)

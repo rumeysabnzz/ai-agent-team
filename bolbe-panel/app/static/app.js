@@ -48,6 +48,8 @@ async function api(path, opts = {}) {
 const sendJSON = (method, path, body) => api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 function renderMarkdown(md) {
+  // Raporlardaki ![ad](media:dosya) görselleri paneldeki medya alanından gösterilir.
+  md = String(md || "").replace(/\]\(media:([^)\s]+)\)/g, (_, name) => `](/api/files/media/${encodeURIComponent(decodeURIComponent(name))})`);
   if (window.marked && window.DOMPurify) return DOMPurify.sanitize(marked.parse(md || ""));
   return `<pre class="markdown">${esc(md)}</pre>`;
 }
@@ -202,7 +204,7 @@ async function refreshBadge() {
 /* ------------------------------------------------------------ yönlendirme */
 
 const routes = { "": pageHome, akislar: pageWorkflows, calisma: pageRun, onay: pageApprovals, raporlar: pageReports,
-  galeri: pageGallery, dosyalar: pageFiles, ayarlar: pageSettings, takvim: pageCalendar, gelisim: pageDevelopment, icerik: pageContentHistory };
+  galeri: pageGallery, dosyalar: pageFiles, ayarlar: pageSettings, takvim: pageCalendar, gelisim: pageDevelopment, icerik: pageContentHistory, urunler: pageProducts };
 let cleanup = null;
 const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
 
@@ -328,7 +330,7 @@ function renderHub() {
     <svg class="connections-svg" id="conn-svg"></svg>
     <a class="hub-center" href="#/gelisim" data-agent="${state.management.controller.id}" title="Ana Kontrolcü · Gelişim">
       <div class="hub-ring"></div><div class="hub-ring"></div><div class="hub-ring"></div>
-      <div class="hub-icon">🧭</div><div class="hub-name">Ana Kontrolcü</div><div class="hub-role">4 yönetici · 12 ajan</div>
+      <div class="hub-icon">🧭</div><div class="hub-name">Ana Kontrolcü</div><div class="hub-role">${state.teams.length} yönetici · ${state.teams.reduce((n, t) => n + t.agents.length, 0)} ajan</div>
     </a>
     <div class="teams-grid">${state.teams.map((t, i) => `
       <div class="team-node pos-${i}" data-team="${t.id}">
@@ -930,6 +932,111 @@ function pageContentHistory() {
   view.addEventListener("click", (e) => { const lb = e.target.closest("[data-lb]"); if (lb) openLightbox(lb.dataset.lb, lb.dataset.k); });
   load();
   return onLive((ev) => { if (["run_end", "approval"].includes(ev.type)) load(); });
+}
+
+/* ------------------------------------------------------------ ürün kütüphanesi */
+
+function pageProducts() {
+  view.innerHTML = `
+    <div class="page-head"><div><h1 class="page-title">Ürünler</h1>
+      <p class="page-desc">Markanın gerçek ürünleri. Görsel ve video ekibi ürün görünen her üretimde bu görselleri referans alır; ürün tasarımı uydurulmaz.</p></div>
+      <div class="pr-actions"><button class="btn" id="pr-new">＋ Ürün ekle</button><button class="btn btn-gold" id="pr-run">▶ Dosyalardan güncelle</button></div></div>
+    <div id="pr-note"></div>
+    <form class="card pr-form" id="pr-form" hidden>
+      <div class="card-title" id="pr-form-title">Ürün</div>
+      <input type="hidden" id="pf-id">
+      <div class="pr-grid2">
+        <input type="text" id="pf-name" placeholder="Ürün adı (etiketteki gibi)" required minlength="2">
+        <input type="text" id="pf-category" placeholder="Kategori (serum, tonik, SPF…)">
+        <input type="text" id="pf-size" placeholder="Hacim (ör. 30 ml)">
+        <input type="text" id="pf-price" placeholder="Fiyat (ör. 395 TL)">
+        <input type="text" id="pf-colors" placeholder="Renkler, virgülle (#D4A43A, #FFFFFF)">
+        <input type="text" id="pf-packaging" placeholder="Ambalaj (damlalıklı cam şişe, beyaz kapak…)">
+      </div>
+      <textarea id="pf-label" placeholder="Etiket yazısı (görünen metin birebir)" style="min-height:70px"></textarea>
+      <textarea id="pf-ingredients" placeholder="Öne çıkan içerikler" style="min-height:60px"></textarea>
+      <textarea id="pf-desc" placeholder="Kısa görsel tarif" style="min-height:60px"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" id="pf-cancel">Vazgeç</button><button type="submit" class="btn btn-gold">Kaydet</button></div>
+    </form>
+    <div class="pr-list" id="pr-list"></div>`;
+  let items = [];
+  const F = ["id", "name", "category", "size", "price", "packaging", "label", "ingredients", "desc"];
+  const field = (k) => $(`#pf-${k}`);
+  const openForm = (p = {}) => {
+    $("#pr-form").hidden = false;
+    $("#pr-form-title").textContent = p.id ? `Düzenle: ${p.name}` : "Yeni ürün";
+    field("id").value = p.id || ""; field("name").value = p.name || ""; field("category").value = p.category || "";
+    field("size").value = p.size || ""; field("price").value = p.price || ""; field("colors").value = (p.colors || []).join(", ");
+    field("packaging").value = p.packaging || ""; field("label").value = p.label_text || "";
+    field("ingredients").value = p.key_ingredients || ""; field("desc").value = p.description || "";
+    $("#pr-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const draw = () => {
+    $("#pr-list").innerHTML = items.length ? items.map((p) => `
+      <div class="card pr-card" data-id="${p.id}">
+        <div class="pr-img">${p.primary ? `<img src="${fileUrl("media", p.primary)}" alt="${esc(p.name)}" data-lb="${esc(p.primary)}" data-k="image">` : `<span class="muted">Görsel yok</span>`}</div>
+        ${p.images.length > 1 ? `<div class="pr-thumbs">${p.images.map((i) => `<img src="${fileUrl("media", i)}" class="${i === p.primary ? "on" : ""}" data-primary="${esc(i)}" title="Ana görsel yap">`).join("")}</div>` : ""}
+        <h3>${esc(p.name)}</h3>
+        <div class="pr-chips">${[p.category, p.size, p.price].filter(Boolean).map((x) => chip(x, "gray")).join("")}</div>
+        ${(p.colors || []).length ? `<div class="pr-colors">${p.colors.map((c) => `<span style="background:${esc(c)}" title="${esc(c)}"></span>`).join("")}<small>${p.colors.map(esc).join(" · ")}</small></div>` : ""}
+        ${p.packaging ? `<p><b>Ambalaj:</b> ${esc(p.packaging)}</p>` : ""}
+        ${p.label_text ? `<p><b>Etiket:</b> ${esc(p.label_text)}</p>` : ""}
+        ${p.key_ingredients ? `<p><b>İçerik:</b> ${esc(p.key_ingredients)}</p>` : ""}
+        ${p.description ? `<details><summary>Görsel tarif</summary><p>${esc(p.description)}</p></details>` : ""}
+        <small class="muted">${esc(p.updated_by || "")} · ${fmtDate(p.updated)}</small>
+        <div class="pr-card-actions">
+          <label class="btn btn-sm">＋ Görsel<input type="file" accept="image/png,image/jpeg,image/webp" data-upload="${p.id}" hidden></label>
+          <label class="pr-clean"><input type="checkbox" data-clean="${p.id}" checked> zemini temizle</label>
+          <button class="btn btn-sm" data-edit="${p.id}">✎ Düzenle</button>
+          <button class="btn btn-sm btn-danger" data-del="${p.id}">✕</button>
+        </div>
+      </div>`).join("") : `<div class="card empty pr-empty">
+        <b>Ürün kütüphanesi boş.</b><br>1) <a href="#/dosyalar">Dosyalar</a>'a ürün fotoğraflarını veya PDF kataloğu yükleyin (mümkünse düz beyaz zeminde, ön yüz).
+        2) "Dosyalardan güncelle"ye basın; Ürün Kütüphanecisi ürünleri tanıyıp kırpar ve kimlik kartlarını doldurur. Ya da "Ürün ekle" ile elle girin.</div>`;
+  };
+  const load = async () => {
+    const d = await api("/api/products").catch((e) => (toast(e.message), null));
+    if (!d) return;
+    items = d.products;
+    $("#pr-note").innerHTML = d.public_links ? "" : `<div class="ap-rev bad" style="margin-bottom:12px">Panelin herkese açık adresi bilinmiyor; Virale ürün görsellerini indiremez. Railway'de <b>PUBLIC_BASE_URL</b> değişkenine panelin adresini (https://…) yazın.</div>`;
+    draw();
+  };
+  $("#pr-new").addEventListener("click", () => openForm());
+  $("#pf-cancel").addEventListener("click", () => ($("#pr-form").hidden = true));
+  $("#pr-run").addEventListener("click", async () => {
+    try { const r = await sendJSON("POST", "/api/workflows/urun-kutuphanesi/run", { note: "" }); location.hash = `#/calisma?id=${r.id}`; } catch (ex) { toast(ex.message); }
+  });
+  $("#pr-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = { id: field("id").value, name: field("name").value, category: field("category").value, size: field("size").value,
+      price: field("price").value, colors: field("colors").value.split(",").map((x) => x.trim()).filter(Boolean),
+      packaging: field("packaging").value, label_text: field("label").value, key_ingredients: field("ingredients").value, description: field("desc").value };
+    try { await sendJSON("POST", "/api/products", body); toast("Kaydedildi"); $("#pr-form").hidden = true; load(); } catch (ex) { toast(ex.message); }
+  });
+  $("#pr-list").addEventListener("click", async (e) => {
+    const lb = e.target.closest("[data-lb]"); if (lb) return openLightbox(lb.dataset.lb, "image");
+    const prim = e.target.closest("[data-primary]");
+    const card = e.target.closest(".pr-card"); if (!card) return;
+    const id = card.dataset.id, p = items.find((x) => x.id === id);
+    if (prim) { await sendJSON("POST", `/api/products/${id}/primary`, { name: prim.dataset.primary }).catch((ex) => toast(ex.message)); return load(); }
+    if (e.target.closest("[data-edit]")) return openForm(p);
+    if (e.target.closest("[data-del]")) {
+      if (!confirm(`"${p.name}" kütüphaneden silinsin mi? (Görsel dosyaları Galeri'de kalır)`)) return;
+      try { await api(`/api/products/${id}`, { method: "DELETE" }); load(); } catch (ex) { toast(ex.message); }
+    }
+  });
+  $("#pr-list").addEventListener("change", async (e) => {
+    const inp = e.target.closest("[data-upload]"); if (!inp || !inp.files.length) return;
+    const id = inp.dataset.upload;
+    const fd = new FormData(); fd.append("file", inp.files[0]); fd.append("clean", $(`[data-clean="${id}"]`).checked ? "true" : "false");
+    toast("Görsel işleniyor…");
+    try {
+      const res = await fetch(`/api/products/${id}/images`, { method: "POST", body: fd, credentials: "same-origin" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Yüklenemedi");
+      toast("Görsel eklendi"); load();
+    } catch (ex) { toast(ex.message); }
+  });
+  load();
 }
 
 /* ------------------------------------------------------------ takvim: günlük geçmiş */

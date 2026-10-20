@@ -9,13 +9,17 @@ BOLBÉ Skincare'in 4 takım, 12 ajandan oluşan AI pazarlama ekibi ve ekibi canl
 
 | Takım | Ajanlar | Düzenli iş |
 |-------|---------|------------|
-| **1 · Rakip Analiz** | İçerik Tarayıcı → Strateji Analisti → Erken Uyarı Ajanı | Her Pazartesi 08:00 rakip taraması, uyarılar, haftalık rakip raporu |
+| **1 · Rakip Analiz** | İçerik Tarayıcı → Ürün Karşılaştırma Analisti → Strateji Analisti → Erken Uyarı Ajanı | Her Pazartesi 08:00 rakip taraması, uyarılar, haftalık rakip raporu |
 | **2 · Marka Analiz ve Strateji** | Performans Analisti → Hedef Kitle Analisti → Strateji Plancısı | Her Pazartesi 11:00 haftalık içerik takvimi; her ayın 1'i 09:00 aylık strateji planı |
-| **3 · İçerik Üretim** | Copywriter → Görsel Tasarımcı → Carousel Uzmanı | Her Salı 09:00 takvimdeki görsel, story ve carousel'leri üretip onaya gönderir |
+| **3 · İçerik Üretim** | Copywriter → Görsel Tasarımcı → Carousel Uzmanı · Ürün Kütüphanecisi (elle: "Ürün kütüphanesini güncelle") | Her Salı 09:00 takvimdeki görsel, story ve carousel'leri üretip onaya gönderir |
 | **4 · Video Üretim** | Senaryo Yazarı → Video Üretici → Video Editör | Her Çarşamba 09:00 en az 3 reel + 5 story: senaryo, üretim, kurgu paketi |
 | **Yönetim** | 4 Takım Yöneticisi → Ana Kontrolcü | Her Cuma 17:00 haftalık yönetim değerlendirmesi ve yönetim raporu |
 
 **Yönetim yapısı:** Her takımın bir yöneticisi var. Yönetici takımının çalışmalarını, hatalarını, maliyetini ve Kurucunun onay/revize/ret notlarını inceler; ajanlarının hafızasına ders yazar, gerekirse web'den kaynaklı bilgi notu ekler ve Ana Kontrolcüye rapor verir. Ana Kontrolcü takımlar arası zinciri ve bütçeyi kontrol eder, "Haftalık Yönetim Raporu"nu kaydeder ve Kurucuya yalnız karar gerektiren konuları iletir.
+
+**Ürün kütüphanesi:** Ürün Kütüphanecisi (Takım 3) yüklenen ürün fotoğraflarından ve PDF kataloglardan ürünleri tanır, kırpar, düz zemini şeffaf yapar ve her ürün için kimlik kartı (ad, hacim, fiyat, ambalaj, etiket yazısı, renk kodları, içerik) oluşturur. Görsel Tasarımcı, Carousel Uzmanı ve Video Üretici ürün görünen her üretimde bu görselleri Virale'ye referans verir (görsel: `images`, carousel: `userPhotos`, video: `referenceImages` / `firstFrameUrl`); kütüphanede olmayan ürünün tasarımı uydurulmaz. **Ürünler** sayfasından elle de ürün ve görsel eklenir.
+
+**Muadil ürün raporu:** Ürün Karşılaştırma Analisti (Takım 1) rakip ürünlerinin Türkiye fiyatını, ml başı fiyatını, içeriğini ve ürün görselini web'den bulur, BOLBÉ muadiliyle (kütüphane görseliyle) yan yana kısa bir rapor yazar. Haftalık rakip taramasının 2. adımıdır; "Muadil ürün raporu" akışıyla tek başına da çalışır. Görseller PDF, PowerPoint (her ürün bir kart slaytı), Excel ve Word çıktılarına da girer.
 
 **Arşiv kullanımı:** Ajanlar her çalışmada şunları görür: Kurucunun yüklediği dosyalar ve notları, kendi son işleri, Kurucunun son talimatları ve son raporlar. `search_archive` aracıyla tüm geçmişte (raporlar, yüklenen dosyalar, geçmiş görev ve çıktılar, onay içerikleri, bilgi bankası) arama yapar. `view_image` ile yüklenen ve üretilen görselleri inceler. Yüklenen PDF, Word (.docx), Excel (.xlsx) ve PowerPoint (.pptx) dosyaları ajanlar için otomatik olarak Markdown metnine çevrilir; Dosyalar sayfasındaki **MD** düğmesi ajanların okuduğu hâli gösterir ve .md olarak indirir. Eski .xls/.doc/.ppt biçimleri yeni biçimde kaydedilip yüklenmelidir. Dosyalar sayfasında yüklenen her dosyaya "ajanlara not" ve hangi takımın kullanacağı eklenebilir.
 
@@ -72,6 +76,8 @@ Telefonda ana ekrana eklenebilir (PWA).
 | `VIRALE_MCP_TOKEN` | ChatPlace MCP erişim anahtarı |
 | `MONTHLY_BUDGET_USD` | Aylık Claude harcama sınırı, ör. `50` |
 | `PORT` | `8080` |
+
+`PUBLIC_BASE_URL`: panelin herkese açık adresi (ör. `https://…up.railway.app`). Railway alan adı verildiğinde `RAILWAY_PUBLIC_DOMAIN` otomatik okunur; okunamazsa bu değişkeni ekleyin. Ürün kütüphanesi görselleri Virale'ye bu adres üzerinden imzalı, 7 gün geçerli bağlantıyla verilir.
 
 İsteğe bağlı: `AGENCY_NAME` (panelde ve raporlarda görünen ajans adı, varsayılan `MOTİF`), `AGENCY_TAGLINE` (varsayılan `Yaratıcı Sosyal Medya Stüdyosu`), `MAX_GENERATIONS_PER_RUN` (12), `MAX_AGENT_TURNS` (30), `MAX_PARALLEL_RUNS` (2), `MAX_UPLOAD_MB` (200), `SESSION_DAYS` (30), `TZ_NAME` (`Europe/Istanbul`).
 

@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import convert, export, runner, storage
+from . import convert, export, products, runner, storage
 from .team import AGENTS, REVISION_ROUTES, WORKFLOW_BY_ID, WORKFLOWS, public_management_view, public_team_view
 
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
@@ -619,6 +619,67 @@ async def delete_knowledge(team: str, note_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- ürün kütüphanesi
+
+
+class ProductBody(BaseModel):
+    id: str = Field("", max_length=20)
+    name: str = Field(min_length=2, max_length=160)
+    category: str = Field("", max_length=80)
+    size: str = Field("", max_length=40)
+    price: str = Field("", max_length=60)
+    colors: list[str] = Field(default_factory=list, max_length=8)
+    packaging: str = Field("", max_length=400)
+    label_text: str = Field("", max_length=600)
+    key_ingredients: str = Field("", max_length=600)
+    description: str = Field("", max_length=1500)
+
+
+@app.get("/api/products", dependencies=auth)
+async def list_products() -> dict[str, Any]:
+    return {"products": products.all_products(), "public_links": bool(products.public_base())}
+
+
+@app.post("/api/products", dependencies=auth)
+async def save_product(body: ProductBody) -> dict[str, Any]:
+    item = await products.save(body.model_dump(), "Kurucu")
+    await storage.log_activity(f"Ürün kütüphanesi güncellendi: {item['name']}", "info")
+    return item
+
+
+@app.delete("/api/products/{product_id}", dependencies=auth)
+async def delete_product(product_id: str) -> dict[str, Any]:
+    if not await products.delete(product_id):
+        raise HTTPException(404, "Ürün bulunamadı")
+    return {"ok": True}
+
+
+@app.post("/api/products/{product_id}/images", dependencies=auth)
+async def add_product_image(product_id: str, file: UploadFile = File(...), clean: bool = Form(True)) -> dict[str, Any]:
+    item = products.get(product_id)
+    if not item:
+        raise HTTPException(404, "Ürün bulunamadı")
+    raw = await storage.save_upload("uploads", file)
+    if raw.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+        raise HTTPException(400, "Yalnız jpg, png veya webp ürün görseli eklenebilir")
+    media_name, colors = await asyncio.to_thread(products.crop_to_library, "uploads", raw.name, [0, 0, 1, 1], item["name"], clean)
+    if not item.get("colors"):
+        await products.save({"id": product_id, "colors": colors}, "Kurucu")
+    return await products.add_image(product_id, media_name)
+
+
+class PrimaryBody(BaseModel):
+    name: str
+
+
+@app.post("/api/products/{product_id}/primary", dependencies=auth)
+async def set_primary(product_id: str, body: PrimaryBody) -> dict[str, Any]:
+    try:
+        return await products.add_image(product_id, body.name, primary=True)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 # ---------------------------------------------------------------- ayarlar
 
 
@@ -699,6 +760,14 @@ def _client_name() -> str:
 @app.get("/manifest.webmanifest")
 async def manifest() -> Response:
     return Response(_branded((STATIC_DIR / "manifest.webmanifest").read_text("utf-8")), media_type="application/manifest+json")
+
+
+@app.get("/pub/{token}/{name}")
+async def public_media(token: str, name: str) -> FileResponse:
+    """Ürün kütüphanesi görsellerinin Virale gibi dış servislere verilen imzalı, süreli bağlantısı (girişsiz)."""
+    if not products.verify(token, name):
+        raise HTTPException(404, "Bağlantı geçersiz veya süresi dolmuş")
+    return FileResponse(products.media_path(name), headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/sw.js")
