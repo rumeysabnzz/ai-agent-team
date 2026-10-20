@@ -15,8 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 FONT_DIR = Path(__file__).parent / "fonts"
-AGENCY_NAME = os.getenv("AGENCY_NAME", "NABIZ")
-AGENCY_TAGLINE = os.getenv("AGENCY_TAGLINE", "Sosyal Medya Komuta Merkezi")
+AGENCY_NAME = os.getenv("AGENCY_NAME", "MOTİF")
+AGENCY_TAGLINE = os.getenv("AGENCY_TAGLINE", "Yaratıcı Sosyal Medya Stüdyosu")
 BRAND = "8A6514"          # koyu altın
 BRAND_SOFT = "F6ECD2"
 INK = "1F1D2B"
