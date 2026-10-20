@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#f7f5f0">
+<meta name="theme-color" content="#f6f1fb">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>{{AGENCY}} · {{TAGLINE}}</title>
@@ -14,7 +14,7 @@
   try {
     if (localStorage.getItem("theme") === "dark") {
       document.documentElement.dataset.theme = "dark";
-      document.querySelector('meta[name="theme-color"]').content = "#0d0d16";
+      document.querySelector('meta[name="theme-color"]').content = "#120d1c";
     }
   } catch (e) {}
 </script>
@@ -53,32 +53,18 @@
 <div id="app" hidden>
   <header class="topbar">
     <a href="#/" class="topbar-brand"><span class="brand-mark sm">{{AGENCY}}</span><span class="topbar-sub">{{TAGLINE}}</span></a>
-    <nav class="nav" aria-label="Sayfalar">
-      <a href="#/" data-route="home"><span class="nav-ico">◎</span><span>Ana ekran</span></a>
-      <a href="#/akislar" data-route="akislar"><span class="nav-ico">⟳</span><span>Akışlar</span></a>
-      <a href="#/onay" data-route="onay"><span class="nav-ico">✓</span><span>Onay</span><b class="nav-badge" id="badge-onay" hidden></b></a>
-      <a href="#/takvim" data-route="takvim" class="nav-desk"><span class="nav-ico">▦</span><span>Takvim</span></a>
-      <a href="#/urunler" data-route="urunler" class="nav-desk"><span class="nav-ico">◈</span><span>Ürünler</span></a>
-      <a href="#/raporlar" data-route="raporlar" class="nav-desk"><span class="nav-ico">▤</span><span>Raporlar</span></a>
-      <a href="#/galeri" data-route="galeri" class="nav-desk"><span class="nav-ico">▣</span><span>Galeri</span></a>
-      <a href="#/dosyalar" data-route="dosyalar" class="nav-desk"><span class="nav-ico">⇪</span><span>Dosyalar</span></a>
-      <a href="#/gelisim" data-route="gelisim" class="nav-desk"><span class="nav-ico">✦</span><span>Gelişim</span></a>
-      <a href="#/ayarlar" data-route="ayarlar" class="nav-desk"><span class="nav-ico">⚙</span><span>Ayarlar</span></a>
-      <button type="button" class="nav-more" id="nav-more"><span class="nav-ico">⋯</span><span>Daha</span></button>
-    </nav>
-    <div class="cal-wrap"><button id="cal-toggle" class="theme-btn cal-btn" type="button" aria-label="Takvimi aç" title="Takvim: güne göre geçmiş">▦</button>
-      <div class="cal-pop card" id="cal-pop" hidden></div></div>
-    <button id="theme-toggle" class="theme-btn" type="button" aria-label="Temayı değiştir">☾</button>
-    <button id="logout" class="btn btn-ghost btn-sm" type="button">Çıkış</button>
-  </header>
-  <div class="sheet" id="more-sheet" hidden>
-    <div class="sheet-card">
-      <a href="#/takvim">▦ Takvim</a><a href="#/gelisim">✦ Gelişim</a><a href="#/urunler">◈ Ürünler</a><a href="#/raporlar">▤ Raporlar</a><a href="#/galeri">▣ Galeri</a><a href="#/dosyalar">⇪ Dosyalar</a><a href="#/ayarlar">⚙ Ayarlar</a>
-      <button type="button" id="theme-m" class="sheet-theme">☾ Koyu tema</button>
-      <button type="button" id="logout-m">Çıkış yap</button>
+    <nav class="nav" id="nav" aria-label="Bölümler"></nav>
+    <div class="top-actions">
+      <div class="cal-wrap"><button id="cal-toggle" class="icon-btn" type="button" aria-label="Takvimi aç" title="Takvim: güne göre geçmiş"></button>
+        <div class="cal-pop card" id="cal-pop" hidden></div></div>
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Temayı değiştir"></button>
+      <a href="#/ayarlar" id="settings-link" class="icon-btn" aria-label="Ayarlar" title="Ayarlar"></a>
+      <button id="logout" class="btn btn-ghost btn-sm" type="button">Çıkış</button>
     </div>
-  </div>
+  </header>
+  <nav class="subnav" id="subnav" aria-label="Alt sayfalar" hidden></nav>
   <main id="view" class="container" tabindex="-1"></main>
+  <nav class="tabbar" id="tabbar" aria-label="Bölümler"></nav>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>

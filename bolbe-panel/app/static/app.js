@@ -12,7 +12,7 @@ const fmtTime = (iso) => new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-di
 const fmtUsd = (n) => `$${Number(n || 0).toFixed(2)}`;
 const fileUrl = (area, name, download = false) => `/api/files/${area}/${encodeURIComponent(name)}${download ? "?download=1" : ""}`;
 const KIND_ICON = { image: "🖼", video: "🎬", audio: "🎧", text: "📄", pdf: "📕", other: "📦" };
-const ACT_COLOR = { upload: "var(--cyan)", report: "var(--gold)", run: "var(--purple)", done: "var(--green)", media: "var(--cyan)", approval: "var(--gold)", alert: "var(--red)", error: "var(--red)", delete: "var(--orange)", info: "var(--muted)" };
+const ACT_COLOR = { upload: "var(--cyan)", report: "var(--brand)", run: "var(--purple)", done: "var(--green)", media: "var(--cyan)", approval: "var(--brand)", alert: "var(--red)", error: "var(--red)", delete: "var(--orange)", info: "var(--muted)" };
 const RUN_STATE = { queued: ["Sırada", "orange"], running: ["Çalışıyor", "cyan"], done: ["Tamamlandı", "green"], failed: ["Hata", "red"] };
 const TOOL_LABEL = {
   web_search: "Web'de arıyor", list_files: "Dosyalara bakıyor", read_file: "Dosya okuyor", save_report: "Rapor kaydediyor",
@@ -24,6 +24,20 @@ const TOOL_LABEL = {
   virale_image_generate: "Görsel üretiyor", virale_carousel_generate: "Carousel üretiyor", virale_video_generate: "Video üretiyor",
   virale_generation_status: "Üretimi kontrol ediyor", virale_ai_balance: "Bakiyeyi kontrol ediyor",
 };
+
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  spark: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L7 20"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  calendar: '<rect x="3" y="4" width="18" height="17" rx="4"/><path d="M8 2v4M16 2v4M3 10h18"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+};
+function icon(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+}
 
 const state = { teams: [], agents: {}, live: {}, feed: [], es: null, agency: { name: "", tagline: "", client: "" } };
 
@@ -80,28 +94,27 @@ $("#login-form").addEventListener("submit", async (e) => {
 
 const logout = async () => { await api("/api/logout", { method: "POST" }).catch(() => {}); showLogin(); };
 $("#logout").addEventListener("click", logout);
-$("#logout-m").addEventListener("click", logout);
+document.addEventListener("click", (e) => { if (e.target.closest("#s-logout")) logout(); });
 
 /* ------------------------------------------------------------ tema (açık / koyu) */
 
-const themeLabel = () => (document.documentElement.dataset.theme === "dark" ? "☀ Açık tema" : "☾ Koyu tema");
+const themeLabel = () => (document.documentElement.dataset.theme === "dark" ? "Açık tema" : "Koyu tema");
 const syncThemeButtons = () => {
-  $("#theme-toggle").textContent = document.documentElement.dataset.theme === "dark" ? "☀" : "☾";
+  $("#theme-toggle").innerHTML = icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon");
   $("#theme-toggle").title = themeLabel();
-  $("#theme-m").textContent = themeLabel();
 };
 const toggleTheme = () => {
   const dark = document.documentElement.dataset.theme !== "dark";
   if (dark) document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme;
   try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch {}
-  $('meta[name="theme-color"]').content = dark ? "#0d0d16" : "#f7f5f0";
+  $('meta[name="theme-color"]').content = dark ? "#120d1c" : "#f6f1fb";
   syncThemeButtons();
   window.dispatchEvent(new Event("themechange"));
 };
 $("#theme-toggle").addEventListener("click", toggleTheme);
-$("#theme-m").addEventListener("click", toggleTheme);
 syncThemeButtons();
-$("#nav-more").addEventListener("click", () => ($("#more-sheet").hidden = false));
+$("#cal-toggle").innerHTML = icon("calendar");
+$("#settings-link").innerHTML = icon("gear");
 
 /* ------------------------------------------------------------ açılır takvim */
 
@@ -142,7 +155,6 @@ $("#cal-pop").addEventListener("click", (e) => {
   if (location.hash === target) route(); else location.hash = target;
 });
 document.addEventListener("click", () => { const b = $("#cal-pop"); if (b) b.hidden = true; });
-$("#more-sheet").addEventListener("click", () => ($("#more-sheet").hidden = true));
 
 /* ------------------------------------------------------------ canlı olaylar */
 
@@ -196,12 +208,52 @@ async function refreshBadge() {
   try {
     const items = await api("/api/approvals");
     const n = items.filter((i) => i.status === "pending").length;
-    const b = $("#badge-onay");
-    b.hidden = !n; b.textContent = n;
+    badgeCount = n; refreshBadgeView();
   } catch { /* yok */ }
 }
 
 /* ------------------------------------------------------------ yönlendirme */
+
+/* ------------------------------------------------------------ bölümler ve gezinme */
+
+// Telefonda alt çubukta yalnız 4 bölüm görünür; her bölümün sayfaları üstte sekme olarak açılır.
+const SECTIONS = [
+  { id: "ana", label: "Ana", icon: "home", pages: [["", "Genel bakış"]] },
+  { id: "uretim", label: "Üretim", icon: "spark", pages: [["akislar", "Akışlar"], ["gelisim", "Ekip gelişimi"]], also: ["calisma"] },
+  { id: "icerik", label: "İçerik", icon: "image", pages: [["onay", "Onay"], ["galeri", "Galeri"]], also: ["icerik"], badge: true },
+  { id: "kutuphane", label: "Kütüphane", icon: "folder", pages: [["urunler", "Ürünler"], ["raporlar", "Raporlar"], ["dosyalar", "Dosyalar"], ["takvim", "Takvim"]] },
+];
+const sectionOf = (key) => SECTIONS.find((s) => s.pages.some(([k]) => k === key) || (s.also || []).includes(key));
+const lastPage = {};
+function renderNav() {
+  const html = SECTIONS.map((s) => `<a href="#/${s.pages[0][0]}" data-sec="${s.id}">${icon(s.icon)}<span>${s.label}</span>${s.badge ? `<b class="nav-badge" data-badge hidden></b>` : ""}</a>`).join("");
+  $("#nav").innerHTML = html;
+  $("#tabbar").innerHTML = html;
+  // bölüme dönünce en son açılan alt sayfaya git
+  $$("[data-sec]").forEach((a) => a.addEventListener("click", (e) => {
+    const sec = SECTIONS.find((s) => s.id === a.dataset.sec), target = lastPage[sec.id];
+    if (target !== undefined && target !== location.hash && sectionOf(location.hash.replace(/^#\/?/, "").split("?")[0]) !== sec) { e.preventDefault(); location.hash = target; }
+  }));
+}
+function updateNav(key) {
+  const sec = key === "ayarlar" ? null : sectionOf(key) || SECTIONS[0];
+  if (sec) lastPage[sec.id] = location.hash || "#/";
+  $$("[data-sec]").forEach((a) => a.classList.toggle("active", a.dataset.sec === sec?.id));
+  $("#settings-link").classList.toggle("active", key === "ayarlar");
+  const sub = $("#subnav");
+  sub.hidden = !sec || sec.pages.length < 2;
+  if (!sub.hidden) sub.innerHTML = `<div class="seg">${sec.pages.map(([k, label]) => `<a href="#/${k}" class="${k === key || (key === "calisma" && k === "akislar") || (key === "icerik" && k === "onay") ? "active" : ""}">${label}${k === "onay" ? `<b class="nav-badge sm" data-badge hidden></b>` : ""}</a>`).join("")}</div>`;
+  refreshBadgeView();
+}
+let badgeCount = 0;
+function refreshBadgeView() { $$("[data-badge]").forEach((b) => { b.hidden = !badgeCount; b.textContent = badgeCount; }); }
+
+// Telefon algılama: dar ekran veya yatay tutulan dokunmatik telefon. Sınıf CSS ve JS davranışları içindir.
+const PHONE_MQ = matchMedia("(max-width: 720px), (pointer: coarse) and (max-height: 520px)");
+const syncDevice = () => document.documentElement.classList.toggle("phone", PHONE_MQ.matches);
+syncDevice();
+PHONE_MQ.addEventListener?.("change", syncDevice);
+renderNav();
 
 const routes = { "": pageHome, akislar: pageWorkflows, calisma: pageRun, onay: pageApprovals, raporlar: pageReports,
   galeri: pageGallery, dosyalar: pageFiles, ayarlar: pageSettings, takvim: pageCalendar, gelisim: pageDevelopment, icerik: pageContentHistory, urunler: pageProducts };
@@ -211,8 +263,7 @@ const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
 function route() {
   const key = location.hash.replace(/^#\/?/, "").split("?")[0];
   const page = routes[key] || pageHome;
-  $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (key || "home") || (key === "calisma" && a.dataset.route === "akislar") || (key === "icerik" && a.dataset.route === "onay")));
-  $("#more-sheet").hidden = true;
+  updateNav(routes[key] ? key : "");
   if (cleanup) { cleanup(); cleanup = null; }
   view.innerHTML = "";
   window.scrollTo(0, 0);
@@ -374,7 +425,7 @@ function drawConnections() {
   svg.innerHTML = $$(".team-node", hub).map((node) => {
     const r = node.getBoundingClientRect();
     const x = r.left - box.left + r.width / 2, y = r.top - box.top + r.height / 2;
-    const color = getComputedStyle(node.querySelector(".node-card")).getPropertyValue("--card-color").trim() || "#e9e186";
+    const color = getComputedStyle(node.querySelector(".node-card")).getPropertyValue("--card-color").trim() || "#d62976";
     const mx = (cx + x) / 2 + (y - cy) * 0.15, my = (cy + y) / 2 - (x - cx) * 0.15;
     const d = `M${cx},${cy} Q${mx},${my} ${x},${y}`;
     return `<path class="conn-path" d="${d}" stroke="${color}"/>
@@ -907,7 +958,8 @@ function uploadFiles(area, fileList, progressBox, done, extra = {}) {
 
 function pageSettings() {
   view.innerHTML = `<div class="page-head"><div><h1 class="page-title">Ayarlar</h1>
-    <p class="page-desc">Ajanların her çalışmada okuduğu marka profili ve rakip listesi.</p></div></div>
+    <p class="page-desc">Ajanların her çalışmada okuduğu marka profili ve rakip listesi.</p></div>
+    <button type="button" class="btn btn-sm btn-danger only-mobile" id="s-logout">Çıkış yap</button></div>
     <div class="grid-2" style="margin-top:0">
       <form class="card task-form" id="settings-form">
         <div class="card-title">🏷 Marka profili</div>
@@ -1297,7 +1349,7 @@ function pageDevelopment() {
   let w, h, dots, rgb, alpha;
   const readColors = () => {
     const cs = getComputedStyle(document.documentElement);
-    rgb = cs.getPropertyValue("--particle").trim() || "166,124,31";
+    rgb = cs.getPropertyValue("--particle").trim() || "214,41,118";
     alpha = parseFloat(cs.getPropertyValue("--particle-alpha")) || 0.3;
   };
   const resize = () => {
