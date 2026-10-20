@@ -1,4 +1,4 @@
-/* BOLBÉ AI Komuta Merkezi — arayüz */
+/* Sosyal medya ajansı komuta merkezi — arayüz */
 "use strict";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -25,7 +25,7 @@ const TOOL_LABEL = {
   virale_generation_status: "Üretimi kontrol ediyor", virale_ai_balance: "Bakiyeyi kontrol ediyor",
 };
 
-const state = { teams: [], agents: {}, live: {}, feed: [], es: null };
+const state = { teams: [], agents: {}, live: {}, feed: [], es: null, agency: { name: "", tagline: "", client: "" } };
 
 function toast(msg) {
   const t = $("#toast");
@@ -106,8 +106,8 @@ $("#nav-more").addEventListener("click", () => ($("#more-sheet").hidden = false)
 let popMonth = "";
 async function drawPopCal() {
   const box = $("#cal-pop");
-  const data = await api(`/api/calendar?month=${popMonth}`).catch(() => null);
-  if (!data) return;
+  const data = await api(`/api/calendar?month=${popMonth}`).catch((e) => ({ error: e.message }));
+  if (data.error) { box.innerHTML = `<div class="cal-error">Takvim yüklenemedi: ${esc(data.error)}</div>`; return; }
   popMonth = data.month;
   const [y, m] = popMonth.split("-").map(Number);
   const first = (new Date(y, m - 1, 1).getDay() + 6) % 7, total = new Date(y, m, 0).getDate();
@@ -224,6 +224,7 @@ async function startApp() {
   if (ov) {
     state.teams = ov.teams;
     state.management = ov.management;
+    state.agency = ov.agency;
     state.agents = Object.fromEntries(ov.teams.flatMap((t) => [...t.agents, t.manager].map((a) => [a.id, { ...a, team: t.id, color: t.color }])));
     state.agents[ov.management.controller.id] = { ...ov.management.controller, team: "yonetim", color: ov.management.color };
     for (const r of ov.live) if (r.current_agent) state.live[r.current_agent] = { run: r.id, text: "Çalışıyor", time: r.created };
@@ -246,8 +247,9 @@ function onLive(fn) {
 function pageHome() {
   view.innerHTML = `
     <section class="hero">
-      <div class="brand-mark">BOLBÉ SKINCARE</div>
-      <div class="hero-sub">AI TAKIM KOMUTA MERKEZİ</div>
+      <div class="brand-mark">${esc(state.agency.name)}</div>
+      <div class="hero-sub">${esc(state.agency.tagline.toLocaleUpperCase("tr-TR"))}</div>
+      ${state.agency.client ? `<div class="client-chip">Aktif müşteri: <b>${esc(state.agency.client)}</b></div>` : ""}
       <div class="status-row" id="status-row"></div>
     </section>
     <section class="stats-bar" id="stats"></section>
@@ -957,8 +959,13 @@ function pageCalendar() {
     month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; loadMonth(); };
 
   const loadMonth = async () => {
-    const data = await api(`/api/calendar?month=${month}`).catch(() => null);
-    if (!data) return;
+    const data = await api(`/api/calendar?month=${month}`).catch((e) => ({ error: e.message }));
+    if (data.error) {
+      $("#cal-title").textContent = "Takvim yüklenemedi";
+      $("#cal-days").innerHTML = `<div class="cal-error">${esc(data.error)} <button class="btn btn-sm" id="cal-retry">Tekrar dene</button></div>`;
+      $("#cal-retry").onclick = loadMonth;
+      return;
+    }
     month = data.month;
     if (!day) day = data.today.startsWith(month) ? data.today : "";
     setUrl();

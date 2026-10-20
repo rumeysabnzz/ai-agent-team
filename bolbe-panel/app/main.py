@@ -1,4 +1,4 @@
-"""BOLBÉ AI Komuta Merkezi: web sunucusu.
+"""Sosyal medya ajansı AI komuta merkezi: web sunucusu.
 
 Şifreli giriş, dosyalar, ajan ekibi, iş akışları, onay kuyruğu, uyarılar,
 ayarlar ve canlı olay akışı (SSE).
@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -32,6 +33,7 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "")
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
 COOKIE_NAME = "bolbe_session"
 STATIC_DIR = Path(__file__).parent / "static"
+log = logging.getLogger("bolbe")
 
 # ---------------------------------------------------------------- oturum
 
@@ -119,7 +121,7 @@ async def lifespan(_: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="BOLBÉ AI Komuta Merkezi", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title=f"{export.AGENCY_NAME} · {export.AGENCY_TAGLINE}", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 auth = [Depends(require_user)]
 
 
@@ -203,6 +205,7 @@ async def overview() -> dict[str, Any]:
     return {
         "teams": public_team_view(),
         "management": public_management_view(),
+        "agency": {"name": export.AGENCY_NAME, "tagline": export.AGENCY_TAGLINE, "client": _client_name()},
         "live": list(runner.bus.live.values()),
         "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
         "budget": {"month": runner.month_key(), "spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
@@ -518,26 +521,35 @@ def _day_of(iso: str | None) -> str:
     return runner._local_day(iso or "")
 
 
+def _day_records() -> list[tuple[str, str, dict[str, Any]]]:
+    """Takvim için tüm kayıtlar: (gün, tür, kayıt). Bozuk veya eksik alanlı kayıt atlanır, takvimi düşürmez."""
+    out: list[tuple[str, str, dict[str, Any]]] = []
+    sources = [("runs", storage.read_state("runs_index", []), "created"),
+               ("approvals", storage.read_state("approvals", []), "created"),
+               ("alerts", storage.read_state("alerts", []), "time"),
+               ("activity", storage.read_state("activity", []), "time")]
+    for area in ("reports", "media"):
+        try:
+            sources.append((area, storage.list_area(area), "modified"))
+        except OSError as exc:
+            log.warning("Takvim: %s alanı okunamadı: %s", area, exc)
+    for kind, items, key in sources:
+        for item in items if isinstance(items, list) else []:
+            day = _day_of(item.get(key)) if isinstance(item, dict) else ""
+            if day:
+                out.append((day, kind, item))
+    return out
+
+
 @app.get("/api/calendar", dependencies=auth)
 async def calendar(month: str = "") -> dict[str, Any]:
     if not re.fullmatch(r"\d{4}-\d{2}", month):
         month = runner.month_key()
     days: dict[str, dict[str, int]] = {}
-
-    def bump(day: str, key: str) -> None:
-        if day.startswith(month):
-            days.setdefault(day, {}).setdefault(key, 0)
-            days[day][key] += 1
-
-    for r in storage.read_state("runs_index", []):
-        bump(_day_of(r["created"]), "runs")
-    for area, key in (("reports", "reports"), ("media", "media")):
-        for f in storage.list_area(area):
-            bump(_day_of(f["modified"]), key)
-    for a in storage.read_state("approvals", []):
-        bump(_day_of(a["created"]), "approvals")
-    for a in storage.read_state("alerts", []):
-        bump(_day_of(a["time"]), "alerts")
+    for day, kind, _ in _day_records():
+        if kind != "activity" and day.startswith(month):
+            days.setdefault(day, {}).setdefault(kind, 0)
+            days[day][kind] += 1
     return {"month": month, "today": datetime.now(runner.TZ).strftime("%Y-%m-%d"), "days": days}
 
 
@@ -545,15 +557,11 @@ async def calendar(month: str = "") -> dict[str, Any]:
 async def day_detail(day: str) -> dict[str, Any]:
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise HTTPException(400, "Tarih YYYY-AA-GG olmalı")
-    return {
-        "day": day,
-        "runs": [r for r in storage.read_state("runs_index", []) if _day_of(r["created"]) == day],
-        "reports": [f for f in storage.list_area("reports") if _day_of(f["modified"]) == day],
-        "media": [f for f in storage.list_area("media") if _day_of(f["modified"]) == day],
-        "approvals": [a for a in storage.read_state("approvals", []) if _day_of(a["created"]) == day],
-        "alerts": [a for a in storage.read_state("alerts", []) if _day_of(a["time"]) == day],
-        "activity": [a for a in storage.read_state("activity", []) if _day_of(a["time"]) == day],
-    }
+    result: dict[str, Any] = {"day": day, "runs": [], "reports": [], "media": [], "approvals": [], "alerts": [], "activity": []}
+    for d, kind, item in _day_records():
+        if d == day:
+            result[kind].append(item)
+    return result
 
 
 # ---------------------------------------------------------------- gelişim: hafıza ve bilgi bankası
@@ -678,9 +686,19 @@ async def health() -> dict[str, str]:
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+def _branded(text: str) -> str:
+    return text.replace("{{AGENCY}}", export.AGENCY_NAME).replace("{{TAGLINE}}", export.AGENCY_TAGLINE)
+
+
+def _client_name() -> str:
+    """Marka profilinin ilk satırındaki "Marka: X (…)" ifadesinden aktif müşterinin adı."""
+    m = re.search(r"Marka:\s*([^(\n]+)", runner.get_settings().get("brand", ""))
+    return m.group(1).strip() if m else ""
+
+
 @app.get("/manifest.webmanifest")
-async def manifest() -> FileResponse:
-    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+async def manifest() -> Response:
+    return Response(_branded((STATIC_DIR / "manifest.webmanifest").read_text("utf-8")), media_type="application/manifest+json")
 
 
 @app.get("/sw.js")
@@ -711,7 +729,7 @@ async def no_stale_assets(request: Request, call_next):  # type: ignore[no-untyp
 @app.get("/")
 async def index() -> Response:
     # Sürüm etiketi değişince tarayıcı arayüz dosyalarını yeni adresten ister.
-    html = (STATIC_DIR / "index.html").read_text("utf-8")
+    html = _branded((STATIC_DIR / "index.html").read_text("utf-8"))
     for asset in ("/static/app.js", "/static/app.css"):
         html = html.replace(f'"{asset}"', f'"{asset}?v={BUILD_VERSION}"')
     return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})

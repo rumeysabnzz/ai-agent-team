@@ -1,4 +1,7 @@
-# BOLBÉ AI Komuta Merkezi
+# NABIZ · Sosyal Medya Komuta Merkezi
+
+Markalardan bağımsız bir sosyal medya ajansının AI ekip paneli. Şu anki müşteri: BOLBÉ Skincare (marka profili Ayarlar'dan değişir).
+
 
 BOLBÉ Skincare'in 4 takım, 12 ajandan oluşan AI pazarlama ekibi ve ekibi canlı izleyip yönettiğiniz web paneli. Railway'de tek servis olarak çalışır. Ajanlar doğrudan Claude API'yi kullanır; Hermes gerekmez.
 
@@ -70,7 +73,7 @@ Telefonda ana ekrana eklenebilir (PWA).
 | `MONTHLY_BUDGET_USD` | Aylık Claude harcama sınırı, ör. `50` |
 | `PORT` | `8080` |
 
-İsteğe bağlı: `MAX_GENERATIONS_PER_RUN` (12), `MAX_AGENT_TURNS` (30), `MAX_PARALLEL_RUNS` (2), `MAX_UPLOAD_MB` (200), `SESSION_DAYS` (30), `TZ_NAME` (`Europe/Istanbul`).
+İsteğe bağlı: `AGENCY_NAME` (panelde ve raporlarda görünen ajans adı, varsayılan `NABIZ`), `AGENCY_TAGLINE` (varsayılan `Sosyal Medya Komuta Merkezi`), `MAX_GENERATIONS_PER_RUN` (12), `MAX_AGENT_TURNS` (30), `MAX_PARALLEL_RUNS` (2), `MAX_UPLOAD_MB` (200), `SESSION_DAYS` (30), `TZ_NAME` (`Europe/Istanbul`).
 
 5. **Settings → Networking → Generate Domain** (port 8080).
 

@@ -1,6 +1,6 @@
 {
-  "name": "BOLBÉ AI Komuta Merkezi",
-  "short_name": "BOLBÉ AI",
+  "name": "{{AGENCY}} · {{TAGLINE}}",
+  "short_name": "{{AGENCY}}",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

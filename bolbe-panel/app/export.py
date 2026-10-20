@@ -1,4 +1,4 @@
-"""Markdown raporları sunuma hazır biçimlere çevirir: PDF (16:9 sunum), Excel, PowerPoint, Word, HTML.
+"""Markdown raporları ajans kimliğiyle sunuma hazır biçimlere çevirir: PDF (16:9 sunum), Excel, PowerPoint, Word, HTML.
 
 Ajanların yazdığı Markdown alt kümesi desteklenir: başlıklar, paragraflar, madde ve numaralı listeler,
 tablolar, alıntılar, yatay çizgi; satır içinde **kalın**, `kod` ve [bağlantı](adres).
@@ -7,6 +7,7 @@ tablolar, alıntılar, yatay çizgi; satır içinde **kalın**, `kod` ve [bağla
 from __future__ import annotations
 
 import html
+import os
 import io
 import re
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 FONT_DIR = Path(__file__).parent / "fonts"
+AGENCY_NAME = os.getenv("AGENCY_NAME", "NABIZ")
+AGENCY_TAGLINE = os.getenv("AGENCY_TAGLINE", "Sosyal Medya Komuta Merkezi")
 BRAND = "8A6514"          # koyu altın
 BRAND_SOFT = "F6ECD2"
 INK = "1F1D2B"
@@ -198,10 +201,10 @@ def to_pdf(doc: Doc) -> bytes:
         canvas.setFillColor(brand)
         canvas.rect(0, H - 6, W, 6, fill=1, stroke=0)
         canvas.setFont(bold, 10)
-        canvas.drawString(margin, 9 * mm, "BOLBÉ")
+        canvas.drawString(margin, 9 * mm, AGENCY_NAME)
         canvas.setFont(font, 9)
         canvas.setFillColor(muted)
-        canvas.drawString(margin + 40, 9 * mm, doc.title[:110])
+        canvas.drawString(margin + canvas.stringWidth(AGENCY_NAME, bold, 10) + 10, 9 * mm, doc.title[:110])
         canvas.drawRightString(W - margin, 9 * mm, f"{canvas.getPageNumber()}")
         canvas.restoreState()
 
@@ -212,16 +215,16 @@ def to_pdf(doc: Doc) -> bytes:
         canvas.setFillColor(brand)
         canvas.rect(0, 0, 14 * mm, H, fill=1, stroke=0)
         canvas.setFont(bold, 22)
-        canvas.drawString(margin + 10 * mm, H - 30 * mm, "B O L B É")
+        canvas.drawString(margin + 10 * mm, H - 30 * mm, " ".join(AGENCY_NAME))
         canvas.setFont(font, 11)
         canvas.setFillColor(muted)
-        canvas.drawString(margin + 10 * mm, 14 * mm, f"BOLBÉ AI Komuta Merkezi · {stamp}")
+        canvas.drawString(margin + 10 * mm, 14 * mm, f"{AGENCY_NAME} · {AGENCY_TAGLINE} · {stamp}")
         canvas.restoreState()
 
     frame = Frame(margin, 16 * mm, W - 2 * margin, H - 32 * mm, id="body")
     cover_frame = Frame(margin + 10 * mm, 30 * mm, W - 2 * margin - 20 * mm, H - 75 * mm, id="cover")
     buf = io.BytesIO()
-    tpl = BaseDocTemplate(buf, pagesize=(W, H), title=doc.title, author="BOLBÉ AI",
+    tpl = BaseDocTemplate(buf, pagesize=(W, H), title=doc.title, author=AGENCY_NAME,
                           pageTemplates=[PageTemplate("cover", [cover_frame], onPage=cover),
                                          PageTemplate("slide", [frame], onPage=chrome)])
 
@@ -365,7 +368,7 @@ def to_pptx(doc: Doc) -> bytes:
         bar.fill.solid(); bar.fill.fore_color.rgb = brand; bar.line.fill.background()
         add_runs(textbox(s, 0.6, 0.35, 12.1, 0.9).paragraphs[0], title or doc.title, 28, ink, True)
         foot = textbox(s, 0.6, 7.0, 12.1, 0.35).paragraphs[0]
-        add_runs(foot, f"BOLBÉ · {doc.title}", 10, muted)
+        add_runs(foot, f"{AGENCY_NAME} · {doc.title}", 10, muted)
         return s
 
     cover = prs.slides.add_slide(blank)
@@ -373,7 +376,7 @@ def to_pptx(doc: Doc) -> bytes:
     bg.fill.solid(); bg.fill.fore_color.rgb = soft; bg.line.fill.background()
     side = cover.shapes.add_shape(1, 0, 0, Inches(0.5), prs.slide_height)
     side.fill.solid(); side.fill.fore_color.rgb = brand; side.line.fill.background()
-    add_runs(textbox(cover, 1.1, 0.8, 11, 0.6).paragraphs[0], "B O L B É", 22, brand, True)
+    add_runs(textbox(cover, 1.1, 0.8, 11, 0.6).paragraphs[0], " ".join(AGENCY_NAME), 22, brand, True)
     add_runs(textbox(cover, 1.1, 2.6, 11, 2).paragraphs[0], doc.title, 40, ink, True)
     sub = textbox(cover, 1.1, 4.5, 11, 2.2)
     for i, line in enumerate(([doc.subtitle] if doc.subtitle else []) + doc.intro):
@@ -513,7 +516,7 @@ table{{border-collapse:collapse;width:100%;margin:12px 0;font-size:.92rem}} th{{
 th,td{{padding:6px 10px;border-bottom:1px solid #E3DDD1;vertical-align:top}} tr:nth-child(even) td{{background:#F7F5F0}}
 blockquote{{color:#{MUTED};border-left:3px solid #{BRAND};margin:0;padding-left:12px}}
 @media print{{h2{{break-before:page}} body{{margin:0}}}}
-</style></head><body><header><small>BOLBÉ AI Komuta Merkezi</small><h1>{html.escape(doc.title)}</h1>
+</style></head><body><header><small>{html.escape(AGENCY_NAME)} · {html.escape(AGENCY_TAGLINE)}</small><h1>{html.escape(doc.title)}</h1>
 {f"<p>{html.escape(doc.subtitle)}</p>" if doc.subtitle else ""}</header>{markdown_html}</body></html>"""
     return page.encode()
 

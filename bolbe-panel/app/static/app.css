@@ -405,6 +405,10 @@ pre.markdown{white-space:pre-wrap}
 @media (max-width:1180px){.cal-layout{grid-template-columns:1fr}.org-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:720px){.cal-day{min-height:52px;padding:4px}.cal-sum{display:none}.cal-num{font-size:.85rem}}
 
+.client-chip{display:inline-block;margin-top:10px;padding:5px 14px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:.92rem;color:var(--muted)}
+.client-chip b{color:var(--text)}
+.cal-error{grid-column:1/-1;padding:16px;color:var(--red);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
 /* ---------- rapor dışa aktarma ---------- */
 .export-group{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
 .export-group .muted{font-size:.85rem;margin-right:2px}
