@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import ipaddress
 import json
 import mimetypes
@@ -327,7 +328,42 @@ CUSTOM_TOOLS.update({
 BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson", "view_image", "search_archive"]
 LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "remove_product_image", "save_product", "list_products"]
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
+IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 MAX_IMAGE_BYTES = 3_500_000
+MAX_IMAGE_SIDE = 2000
+
+
+def sniff_image(head: bytes) -> str | None:
+    """Dosyanın gerçek görsel türü (uzantıya değil içeriğe bakar; Virale png adıyla jpeg verebiliyor)."""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def image_block(path: Path) -> dict[str, Any]:
+    """Görseli Claude'a gönderilecek blok yapar; tür içerikten belirlenir, büyük veya desteklenmeyen görsel JPEG'e küçültülür."""
+    raw = path.read_bytes()
+    media_type = sniff_image(raw[:16])
+    if media_type is None or len(raw) > MAX_IMAGE_BYTES or media_type == "image/gif" and len(raw) > 1_000_000:
+        from PIL import Image
+
+        try:
+            img = Image.open(io.BytesIO(raw))
+            img.load()
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Görsel açılamadı ({path.name}): {exc}") from exc
+        img = img.convert("RGB")
+        img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=85)
+        raw, media_type = buf.getvalue(), "image/jpeg"
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(raw).decode()}}
 MANAGER_TOOLS = ["list_lessons", "remove_lesson", "add_knowledge", "team_activity"]
 MAX_LESSONS = 25
 
@@ -558,16 +594,21 @@ async def download_media(url: str, filename: str) -> str:
             name = storage.safe_name(filename)
             if not Path(name).suffix:
                 name += mimetypes.guess_extension(ctype) or ""
-            target = storage.unique_path("media", name)
-            tmp = target.with_name(target.name + ".part")
-            size = 0
+            tmp = storage.unique_path("media", name + ".part")
+            size, head = 0, b""
             try:
                 with tmp.open("wb") as fh:
                     async for chunk in r.aiter_bytes(1024 * 1024):
+                        head = head or chunk[:16]
                         size += len(chunk)
                         if size > MAX_MEDIA_BYTES:
                             raise ValueError("Dosya çok büyük")
                         fh.write(chunk)
+                # uzantı içerikle uyuşmuyorsa düzelt (ör. jpeg içerikli "x.png")
+                real = sniff_image(head)
+                if real and IMAGE_TYPES.get(Path(name).suffix.lower()) != real:
+                    name = Path(name).stem + IMAGE_EXT[real]
+                target = storage.unique_path("media", name)
                 tmp.replace(target)
             finally:
                 tmp.unlink(missing_ok=True)
@@ -679,14 +720,9 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         return f"{seconds} sn beklendi. Şimdi durumu kontrol et."
     if name == "view_image":
         path = storage.area_file(args["area"], args["name"])
-        media_type = IMAGE_TYPES.get(path.suffix.lower())
-        if not media_type:
+        if path.suffix.lower() not in IMAGE_TYPES:
             raise ValueError("Yalnız jpg, png, webp, gif görseller açılabilir")
-        if path.stat().st_size > MAX_IMAGE_BYTES:
-            raise ValueError("Görsel çok büyük (3,5 MB sınırı)")
-        data = base64.b64encode(path.read_bytes()).decode()
-        return [{"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}},
-                {"type": "text", "text": f"{args['area']}/{path.name}"}]
+        return [await asyncio.to_thread(image_block, path), {"type": "text", "text": f"{args['area']}/{path.name}"}]
     if name == "search_archive":
         hits = search_archive(args["query"])
         return json.dumps(hits, ensure_ascii=False) if hits else "Arşivde eşleşme bulunamadı."
@@ -850,6 +886,22 @@ def _short(value: Any, n: int = 220) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+def _drop_tool_images(messages: list[dict[str, Any]]) -> bool:
+    changed = False
+    for msg in messages:
+        if msg["role"] != "user" or not isinstance(msg["content"], list):
+            continue
+        for block in msg["content"]:
+            if block.get("type") != "tool_result" or not isinstance(block.get("content"), list):
+                continue
+            for i, part in enumerate(block["content"]):
+                if part.get("type") == "image":
+                    block["content"][i] = {"type": "text", "text": "(Görsel modele gönderilemedi; bu görseli inceleyemezsin, "
+                                                                   "durumu raporda belirt.)"}
+                    changed = True
+    return changed
+
+
 async def run_agent(run: Run, agent_id: str, task: str) -> str:
     agent = AGENTS[agent_id]
     settings = get_settings()
@@ -880,6 +932,12 @@ async def run_agent(run: Run, agent_id: str, task: str) -> str:
         except anthropic.RateLimitError:
             run.emit("agent_note", agent=agent_id, text="Hız sınırı; 30 sn bekleniyor")
             await asyncio.sleep(30)
+            continue
+        except anthropic.BadRequestError as exc:
+            # bozuk bir görsel tüm adımı düşürmesin: araç sonuçlarındaki görselleri metne çevirip bir kez daha dene
+            if "image" not in str(exc) or not _drop_tool_images(messages):
+                raise
+            run.emit("agent_note", agent=agent_id, text="Bir görsel modele gönderilemedi; görseller metin notuyla değiştirilip devam ediliyor")
             continue
 
         u = response.usage
