@@ -662,10 +662,19 @@ async def add_product_image(product_id: str, file: UploadFile = File(...), clean
     raw = await storage.save_upload("uploads", file)
     if raw.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
         raise HTTPException(400, "Yalnız jpg, png veya webp ürün görseli eklenebilir")
-    media_name, colors = await asyncio.to_thread(products.crop_to_library, "uploads", raw.name, [0, 0, 1, 1], item["name"], clean)
+    info = await asyncio.to_thread(products.crop_to_library, "uploads", raw.name, [0, 0, 1, 1], item["name"], clean)
     if not item.get("colors"):
-        await products.save({"id": product_id, "colors": colors}, "Kurucu")
-    return await products.add_image(product_id, media_name)
+        await products.save({"id": product_id, "colors": info["colors"]}, "Kurucu")
+    result = await products.add_image(product_id, info["name"])
+    return {**result, "warnings": info["warnings"]}
+
+
+@app.delete("/api/products/{product_id}/images/{name}", dependencies=auth)
+async def remove_product_image(product_id: str, name: str) -> dict[str, Any]:
+    try:
+        return await products.remove_image(product_id, name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 class PrimaryBody(BaseModel):

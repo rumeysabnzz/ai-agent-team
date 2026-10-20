@@ -939,7 +939,7 @@ function pageContentHistory() {
 function pageProducts() {
   view.innerHTML = `
     <div class="page-head"><div><h1 class="page-title">Ürünler</h1>
-      <p class="page-desc">Markanın gerçek ürünleri. Görsel ve video ekibi ürün görünen her üretimde bu görselleri referans alır; ürün tasarımı uydurulmaz.</p></div>
+      <p class="page-desc">Markanın gerçek ürünleri. Görsel ekibi bu şeffaf zeminli görselleri sahnelere birebir yerleştirir, video ekibi ilk kare ve referans olarak kullanır; ürün tasarımı uydurulmaz.</p></div>
       <div class="pr-actions"><button class="btn" id="pr-new">＋ Ürün ekle</button><button class="btn btn-gold" id="pr-run">▶ Dosyalardan güncelle</button></div></div>
     <div id="pr-note"></div>
     <form class="card pr-form" id="pr-form" hidden>
@@ -987,6 +987,7 @@ function pageProducts() {
         <div class="pr-card-actions">
           <label class="btn btn-sm">＋ Görsel<input type="file" accept="image/png,image/jpeg,image/webp" data-upload="${p.id}" hidden></label>
           <label class="pr-clean"><input type="checkbox" data-clean="${p.id}" checked> zemini temizle</label>
+          ${p.primary ? `<button class="btn btn-sm" data-rmimg="${esc(p.primary)}" title="Hatalı ana görseli kütüphaneden kaldır">✕ Görsel</button>` : ""}
           <button class="btn btn-sm" data-edit="${p.id}">✎ Düzenle</button>
           <button class="btn btn-sm btn-danger" data-del="${p.id}">✕</button>
         </div>
@@ -1019,6 +1020,12 @@ function pageProducts() {
     const card = e.target.closest(".pr-card"); if (!card) return;
     const id = card.dataset.id, p = items.find((x) => x.id === id);
     if (prim) { await sendJSON("POST", `/api/products/${id}/primary`, { name: prim.dataset.primary }).catch((ex) => toast(ex.message)); return load(); }
+    const rm = e.target.closest("[data-rmimg]");
+    if (rm) {
+      if (!confirm("Bu görsel ürün kütüphanesinden kaldırılsın mı? (Dosya Galeri'de kalır)")) return;
+      try { await api(`/api/products/${id}/images/${encodeURIComponent(rm.dataset.rmimg)}`, { method: "DELETE" }); load(); } catch (ex) { toast(ex.message); }
+      return;
+    }
     if (e.target.closest("[data-edit]")) return openForm(p);
     if (e.target.closest("[data-del]")) {
       if (!confirm(`"${p.name}" kütüphaneden silinsin mi? (Görsel dosyaları Galeri'de kalır)`)) return;
@@ -1032,8 +1039,9 @@ function pageProducts() {
     toast("Görsel işleniyor…");
     try {
       const res = await fetch(`/api/products/${id}/images`, { method: "POST", body: fd, credentials: "same-origin" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Yüklenemedi");
-      toast("Görsel eklendi"); load();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || "Yüklenemedi");
+      toast((body.warnings || []).length ? `Görsel eklendi. Kontrol edin: ${body.warnings.join(" ")}` : "Görsel eklendi"); load();
     } catch (ex) { toast(ex.message); }
   });
   load();

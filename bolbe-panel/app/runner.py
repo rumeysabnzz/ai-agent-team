@@ -278,14 +278,41 @@ CUSTOM_TOOLS.update({
                          "properties": {"name": {"type": "string"}}},
     },
     "crop_product": {
-        "description": "Bir görselden ürünü kırpar, istenirse düz zemini şeffaf yapar, ürün kütüphanesine referans görsel olarak ekler. "
-                       "box = [x0, y0, x1, y1], görselin genişlik ve yüksekliğine göre 0–1 arası oranlar.",
+        "description": "Bir görseldeki ürünü ayırıp ürün kütüphanesine şeffaf zeminli referans görsel (dekupe) olarak ekler. "
+                       "box = [x0, y0, x1, y1] ürünün sınırları; görselin genişlik ve yüksekliğine göre 0–1 arası oranlar, ürüne sıkı ama "
+                       "ürünü kesmeyecek şekilde. clean_background true ise akıllı kesim ürünü renk ve doku farkıyla zeminden ayırır: "
+                       "keep_boxes kesin ürün olan alanlar (zemine çok benzeyen beyaz gövde, şeffaf kısım, kapak/pompa), remove_boxes kesin "
+                       "zemin olan alanlar (ürün sanılan gölge, yansıma, yandaki nesne); yoksa boş liste. rotate ürünün eğikliği (derece; "
+                       "pozitif = üstü sağa yatık), ürün dikleştirilir; düzse 0. save false iken yalnız kontrol görseli döner, kütüphaneye "
+                       "eklenmez. Sonuç damalı, koyu ve kırmızı zemin üzerinde kontrol görseli olarak döner.",
         "input_schema": {"type": "object", "additionalProperties": False,
-                         "required": ["area", "name", "box", "product_name", "clean_background", "primary"],
+                         "required": ["area", "name", "box", "product_name", "clean_background", "keep_boxes", "remove_boxes",
+                                      "rotate", "save", "primary"],
                          "properties": {"area": {"type": "string", "enum": ["uploads", "media"]}, "name": {"type": "string"},
                                         "box": {"type": "array", "items": {"type": "number"}},
                                         "product_name": {"type": "string"}, "clean_background": {"type": "boolean"},
+                                        "keep_boxes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                                        "remove_boxes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                                        "rotate": {"type": "number"}, "save": {"type": "boolean"},
                                         "primary": {"type": "boolean"}}},
+    },
+    "remove_product_image": {
+        "description": "Ürün kütüphanesinden hatalı bir ürün görselini (ör. delikli, lekeli eski dekupe) kaldırır.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["product_id", "image"],
+                         "properties": {"product_id": {"type": "string"}, "image": {"type": "string"}}},
+    },
+    "compose_product": {
+        "description": "Kütüphanedeki gerçek ürün dekupesini bir sahne görselinin üzerine yerleştirir (Photoshop'taki gibi): ürün "
+                       "box = [x0, y0, x1, y1] alanına oranı korunarak sığdırılır ve tabanı kutunun alt kenarına oturur; ton sahnenin "
+                       "ışığına hafifçe uydurulur, shadow true ise temas ve düşen gölge eklenir. scene media alanındaki sahne görseli "
+                       "(save_media_from_url çıktısı), image boşsa ürünün ana görseli kullanılır. Etiket birebir korunur. Sonuç media "
+                       "alanına kaydedilir; kontrol görseli ve Virale'ye verilebilecek herkese açık bağlantı döner. Birden fazla ürün "
+                       "için çıktıyı sahne olarak verip tekrar çağır.",
+        "input_schema": {"type": "object", "additionalProperties": False,
+                         "required": ["scene", "product_id", "image", "box", "shadow", "filename"],
+                         "properties": {"scene": {"type": "string"}, "product_id": {"type": "string"}, "image": {"type": "string"},
+                                        "box": {"type": "array", "items": {"type": "number"}}, "shadow": {"type": "boolean"},
+                                        "filename": {"type": "string"}}},
     },
     "save_product": {
         "description": "Ürün kimlik kartını oluşturur veya günceller (ada göre eşleşir). Bilinmeyen alanları boş bırak.",
@@ -298,7 +325,7 @@ CUSTOM_TOOLS.update({
     },
 })
 BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson", "view_image", "search_archive"]
-LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "save_product", "list_products"]
+LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "remove_product_image", "save_product", "list_products"]
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 MAX_IMAGE_BYTES = 3_500_000
 MANAGER_TOOLS = ["list_lessons", "remove_lesson", "add_knowledge", "team_activity"]
@@ -497,6 +524,8 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
         names += LIBRARY_TOOLS
     if agent.get("products_read"):
         names += [n for n in ("list_products", "product_reference") if n not in names]
+    if agent.get("compose"):
+        names.append("compose_product")
     if agent.get("product_images") and "save_media_from_url" not in names:
         names.append("save_media_from_url")
     return names
@@ -599,17 +628,44 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         await storage.log_activity(f"{agent['name']} katalogdan {len(saved)} görsel çıkardı: {args['name']}", "upload")
         return json.dumps({"cikarilan": saved}, ensure_ascii=False) if saved else "PDF'te yeterli boyutta görsel bulunamadı."
     if name == "crop_product":
-        box = args["box"]
-        if len(box) != 4:
+        for b in [args["box"], *args["keep_boxes"], *args["remove_boxes"]]:
+            if len(b) != 4:
+                raise ValueError("Her kutu dört sayı olmalı: [x0, y0, x1, y1]")
+        info = await asyncio.to_thread(products.crop_to_library, args["area"], args["name"], args["box"], args["product_name"],
+                                       bool(args["clean_background"]), args["keep_boxes"], args["remove_boxes"],
+                                       float(args["rotate"]), bool(args["save"]))
+        preview = base64.b64encode(info.pop("preview")).decode()
+        report = (f"Yöntem: {info['method']}. Boyut: {info['size'][0]}×{info['size'][1]} px. Renkler: {', '.join(info['colors'])}."
+                  + ("".join(f"\nUyarı: {w}" for w in info["warnings"]) or "\nUyarı yok.")
+                  + "\nKontrol görselinde delik, leke, kesik kapak/pompa, zemin artığı veya hale var mı bak.")
+        if info["name"]:
+            existing = next((p for p in products.all_products() if storage.slug(p["name"]) == storage.slug(args["product_name"])), None)
+            item = await products.save({"name": args["product_name"],
+                                        **({} if existing and existing.get("colors") else {"colors": info["colors"]})}, agent["name"])
+            await products.add_image(item["id"], info["name"], bool(args["primary"]))
+            run.outputs.append({"type": "media", "name": info["name"]})
+            await storage.log_activity(f"Ürün kütüphanesine görsel eklendi: {args['product_name']}", "media")
+            report = f"Kaydedildi: media/{info['name']} (ürün {item['id']}). " + report
+        else:
+            report = "Önizleme (kaydedilmedi; beğenirsen save true ile tekrar çağır). " + report
+        return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": preview}},
+                {"type": "text", "text": report}]
+    if name == "remove_product_image":
+        item = await products.remove_image(args["product_id"], args["image"])
+        return f"Kaldırıldı. Ürünün kalan görselleri: {', '.join(item['images']) or 'yok'}; ana görsel: {item.get('primary') or 'yok'}."
+    if name == "compose_product":
+        if len(args["box"]) != 4:
             raise ValueError("box dört sayı olmalı: [x0, y0, x1, y1]")
-        media_name, colors = await asyncio.to_thread(products.crop_to_library, args["area"], args["name"], box,
-                                                     args["product_name"], bool(args["clean_background"]))
-        existing = next((p for p in products.all_products() if storage.slug(p["name"]) == storage.slug(args["product_name"])), None)
-        item = await products.save({"name": args["product_name"], **({} if existing and existing.get("colors") else {"colors": colors})}, agent["name"])
-        await products.add_image(item["id"], media_name, bool(args["primary"]))
-        run.outputs.append({"type": "media", "name": media_name})
-        await storage.log_activity(f"Ürün kütüphanesine görsel eklendi: {args['product_name']}", "media")
-        return f"Kaydedildi: media/{media_name} (ürün {item['id']}). Algılanan renkler: {', '.join(colors)}. view_image ile kontrol et."
+        res = await asyncio.to_thread(products.compose_to_media, args["scene"], args["product_id"], args["image"], args["box"],
+                                      bool(args["shadow"]), args["filename"])
+        run.outputs.append({"type": "media", "name": res["name"]})
+        await storage.log_activity(f"{agent['name']} ürünü sahneye yerleştirdi: {res['name']}", "media")
+        text = (f"Kaydedildi: media/{res['name']}." + (f" Herkese açık bağlantı: {res['url']}" if res["url"] else "")
+                + (f" Not: {res['note']}" if res["note"] else "")
+                + " Ürünün boyutu, konumu, gölgesi ve sahneyle uyumu doğru mu bak; değilse kutuyu düzeltip tekrar yerleştir.")
+        return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                             "data": base64.b64encode(res["preview"]).decode()}},
+                {"type": "text", "text": text}]
     if name == "save_product":
         item = await products.save({k: args.get(k) for k in products.FIELDS}, agent["name"])
         return f"Ürün kaydedildi: {item['id']} · {item['name']}"
