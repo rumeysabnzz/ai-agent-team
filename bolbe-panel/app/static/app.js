@@ -644,31 +644,121 @@ function pageReports() {
 function pageGallery() {
   view.innerHTML = `
     <div class="page-head"><div><h1 class="page-title">Görsel ve video galerisi</h1>
-      <p class="page-desc">Ekibin ürettiği ve sizin eklediğiniz görsel/videolar.</p></div>
-      <label class="btn btn-gold">＋ Medya yükle<input type="file" id="media-input" accept="image/*,video/*" multiple hidden></label></div>
+      <p class="page-desc">Her çalışmanın görselleri ve videoları kendi klasöründe; revizyonlar ilk çalışmanın klasörüne eklenir.</p></div>
+      <div class="gal-actions"><button class="btn" id="f-new">＋ Klasör</button>
+      <label class="btn btn-gold">＋ Medya yükle<input type="file" id="media-input" accept="image/*,video/*" multiple hidden></label></div></div>
     <div class="upload-progress" id="m-progress"></div>
-    <div class="page-head" style="margin:6px 0 14px"><div class="tabs" id="m-tabs">
-      <button class="tab active" data-k="all">Tümü</button><button class="tab" data-k="image">Görseller</button><button class="tab" data-k="video">Videolar</button></div></div>
-    <div class="gallery" id="gallery"></div>`;
-  let items = [], kind = "all";
-  const draw = () => {
-    const shown = items.filter((f) => (kind === "all" ? ["image", "video"].includes(f.kind) : f.kind === kind));
-    $("#gallery").innerHTML = shown.length ? shown.map((f) => `
-      <button class="g-item" data-n="${esc(f.name)}" data-k="${f.kind}">
-        ${f.kind === "image" ? `<img loading="lazy" src="${fileUrl("media", f.name)}" alt="${esc(f.name)}">` : `<video preload="metadata" muted playsinline src="${fileUrl("media", f.name)}#t=0.5"></video>`}
-        <span class="g-badge chip ${f.kind === "video" ? "chip-orange" : "chip-cyan"}">${f.kind === "video" ? "▶ Video" : "Görsel"}</span>
-        <span class="g-name">${esc(f.name)}</span></button>`).join("") : `<div class="empty" style="grid-column:1/-1">Henüz medya yok</div>`;
+    <div id="gal-body"></div>`;
+  let data = { folders: [], items: [], unfiled: 0 }, kind = "all", selecting = false;
+  const selected = new Set();
+  const folderId = () => params().get("f") || "";
+  const folderName = (id) => id === "all" ? "Tüm medya" : id === "none" ? "Klasörsüz" : (data.folders.find((f) => f.id === id) || {}).name || "";
+  const thumb = (name, k) => k === "video" ? `<video preload="metadata" muted playsinline src="${fileUrl("media", name)}#t=0.5"></video>`
+    : name ? `<img loading="lazy" src="${fileUrl("media", name)}" alt="">` : `<span class="f-empty">📁</span>`;
+  const folderOptions = (current) => [`<option value="">Klasörsüz</option>`, ...data.folders.map((f) =>
+    `<option value="${f.id}" ${f.id === current ? "selected" : ""}>${esc(f.name)}</option>`)].join("");
+
+  const drawFolders = () => {
+    const q = ($("#f-filter")?.value || "").toLocaleLowerCase("tr");
+    const cards = data.folders.filter((f) => f.name.toLocaleLowerCase("tr").includes(q)).map((f) => `
+      <a class="f-card" href="#/galeri?f=${f.id}">
+        <div class="f-cover">${thumb(f.cover, f.cover_kind)}</div>
+        <div class="f-info"><b>${esc(f.name)}</b><small>${f.images} görsel · ${f.videos} video · ${fmtDate(f.updated)}</small></div></a>`).join("");
+    const fixed = `
+      <a class="f-card f-fixed" href="#/galeri?f=all"><div class="f-cover">${thumb(data.items.find((i) => i.kind === "image")?.name || "", "image")}</div>
+        <div class="f-info"><b>Tüm medya</b><small>${data.items.length} dosya</small></div></a>
+      ${data.unfiled ? `<a class="f-card f-fixed" href="#/galeri?f=none"><div class="f-cover"><span class="f-empty">🗂</span></div>
+        <div class="f-info"><b>Klasörsüz</b><small>${data.unfiled} dosya</small></div></a>` : ""}`;
+    $("#gal-body").innerHTML = `
+      <div class="gal-toolbar"><input type="search" id="f-filter" placeholder="Klasör ara…" value="${esc(q)}"></div>
+      <div class="f-grid">${fixed}${cards}</div>
+      ${data.folders.length ? "" : `<div class="empty" style="margin-top:12px">Henüz klasör yok. Ajanların ürettiği görsel ve videolar çalışma adıyla kendiliğinden klasörlenir; "＋ Klasör" ile kendiniz de açabilirsiniz.</div>`}`;
+    $("#f-filter").addEventListener("input", () => { const pos = $("#f-filter").selectionStart; drawFolders(); $("#f-filter").focus(); $("#f-filter").setSelectionRange(pos, pos); });
   };
-  const load = async () => { items = await api("/api/files/media").catch(() => []); draw(); };
-  $("#m-tabs").addEventListener("click", (e) => {
-    const b = e.target.closest(".tab"); if (!b) return;
-    $$(".tab", $("#m-tabs")).forEach((t) => t.classList.toggle("active", t === b));
-    kind = b.dataset.k; draw();
+
+  const drawFolder = (id) => {
+    const inFolder = data.items.filter((f) => id === "all" || (id === "none" ? !f.folder : f.folder === id));
+    const shown = inFolder.filter((f) => kind === "all" || f.kind === kind);
+    const real = id !== "all" && id !== "none";
+    $("#gal-body").innerHTML = `
+      <div class="gal-toolbar">
+        <a class="btn btn-sm" href="#/galeri">← Klasörler</a><h2 class="f-title">${esc(folderName(id))} <small class="muted">${inFolder.length}</small></h2>
+        <div class="tabs" id="m-tabs">${[["all", "Tümü"], ["image", "Görseller"], ["video", "Videolar"]].map(([k, l]) =>
+          `<button class="tab ${k === kind ? "active" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
+        <div class="gal-actions">
+          <button class="btn btn-sm ${selecting ? "btn-gold" : ""}" id="f-select">${selecting ? "Seçimi bitir" : "☑ Seç"}</button>
+          ${real ? `<a class="btn btn-sm" href="/api/media/folders/${id}/zip">↓ ZIP</a>
+          <button class="btn btn-sm" id="f-rename">✎ Ad</button><button class="btn btn-sm btn-danger" id="f-del">✕ Klasör</button>` : ""}</div>
+      </div>
+      ${selecting ? `<div class="sel-bar"><span><b id="sel-count">${selected.size}</b> seçili</span>
+        <button class="btn btn-sm" id="sel-all">Tümünü seç</button>
+        <select id="sel-target">${folderOptions(real ? id : "")}<option value="__new">＋ Yeni klasör…</option></select>
+        <button class="btn btn-sm btn-gold" id="sel-move">Taşı</button></div>` : ""}
+      <div class="gallery ${selecting ? "selecting" : ""}" id="gallery">${shown.length ? shown.map((f) => `
+        <button class="g-item ${selected.has(f.name) ? "picked" : ""}" data-n="${esc(f.name)}" data-k="${f.kind}">
+          ${thumb(f.name, f.kind)}
+          <span class="g-badge chip ${f.kind === "video" ? "chip-orange" : "chip-cyan"}">${f.kind === "video" ? "▶ Video" : "Görsel"}</span>
+          ${selecting ? `<span class="g-check">${selected.has(f.name) ? "✓" : ""}</span>` : ""}
+          <span class="g-name">${esc(f.name)}</span></button>`).join("") : `<div class="empty" style="grid-column:1/-1">Bu klasörde medya yok</div>`}</div>`;
+  };
+
+  const draw = () => (folderId() ? drawFolder(folderId()) : drawFolders());
+  const load = async () => {
+    try { data = await api("/api/media"); } catch (ex) { toast(ex.message); }
+    if (folderId() && !folderName(folderId())) { history.replaceState(null, "", "#/galeri"); }
+    draw();
+  };
+  const newFolder = async () => {
+    const name = prompt("Klasör adı (ör. Ekim CICA lansmanı)"); if (!name?.trim()) return null;
+    try { return await sendJSON("POST", "/api/media/folders", { name: name.trim() }); } catch (ex) { toast(ex.message); return null; }
+  };
+  const move = async (names, target) => {
+    if (target === "__new") { const f = await newFolder(); if (!f) return false; target = f.id; }
+    try { await sendJSON("POST", "/api/media/move", { names, folder: target }); toast(`${names.length} dosya taşındı`); return true; }
+    catch (ex) { toast(ex.message); return false; }
+  };
+
+  $("#f-new").addEventListener("click", async () => { const f = await newFolder(); if (f) { location.hash = `#/galeri?f=${f.id}`; } });
+  $("#media-input").addEventListener("change", (e) => {
+    const id = folderId(), name = id && id !== "all" && id !== "none" ? folderName(id) : "";
+    uploadFiles("media", e.target.files, $("#m-progress"), load, { folder: name }); e.target.value = "";
   });
-  $("#media-input").addEventListener("change", (e) => { uploadFiles("media", e.target.files, $("#m-progress"), load); e.target.value = ""; });
-  $("#gallery").addEventListener("click", (e) => { const b = e.target.closest(".g-item"); if (b) openLightbox(b.dataset.n, b.dataset.k, load); });
+  $("#gal-body").addEventListener("click", async (e) => {
+    const id = folderId();
+    const tab = e.target.closest("#m-tabs .tab"); if (tab) { kind = tab.dataset.k; return draw(); }
+    if (e.target.closest("#f-select")) { selecting = !selecting; selected.clear(); return draw(); }
+    if (e.target.closest("#f-rename")) {
+      const name = prompt("Yeni klasör adı", folderName(id)); if (!name?.trim()) return;
+      try { await sendJSON("PUT", `/api/media/folders/${id}`, { name: name.trim() }); load(); } catch (ex) { toast(ex.message); }
+      return;
+    }
+    if (e.target.closest("#f-del")) {
+      if (!confirm(`"${folderName(id)}" klasörü silinsin mi? İçindeki dosyalar silinmez, "Klasörsüz"e geçer.`)) return;
+      try { await api(`/api/media/folders/${id}`, { method: "DELETE" }); location.hash = "#/galeri"; } catch (ex) { toast(ex.message); }
+      return;
+    }
+    if (e.target.closest("#sel-all")) { $$(".g-item", $("#gallery")).forEach((b) => selected.add(b.dataset.n)); return draw(); }
+    if (e.target.closest("#sel-move")) {
+      if (!selected.size) return toast("Önce dosya seçin");
+      if (await move([...selected], $("#sel-target").value)) { selected.clear(); selecting = false; load(); }
+      return;
+    }
+    const item = e.target.closest(".g-item"); if (!item) return;
+    if (selecting) {
+      selected.has(item.dataset.n) ? selected.delete(item.dataset.n) : selected.add(item.dataset.n);
+      item.classList.toggle("picked"); item.querySelector(".g-check").textContent = selected.has(item.dataset.n) ? "✓" : "";
+      $("#sel-count").textContent = selected.size; return;
+    }
+    openLightbox(item.dataset.n, item.dataset.k, load);
+    const current = data.items.find((f) => f.name === item.dataset.n)?.folder || "";
+    const sel = document.createElement("select");
+    sel.className = "lb-folder"; sel.title = "Klasör";
+    sel.innerHTML = folderOptions(current) + `<option value="__new">＋ Yeni klasör…</option>`;
+    sel.onchange = async () => { if (await move([item.dataset.n], sel.value)) load(); else sel.value = current; };
+    $(".lb-bar .lb-title").after(sel);
+  });
   load();
-  return onLive((ev) => { if (ev.type === "tool" && ev.tool === "save_media_from_url") setTimeout(load, 3000); });
+  return onLive((ev) => { if (ev.type === "tool" && ["save_media_from_url", "compose_product", "crop_product"].includes(ev.tool)) setTimeout(load, 3000); });
 }
 
 function openLightbox(name, kind, onDelete) {
@@ -781,7 +871,7 @@ function pageFiles() {
   load();
 }
 
-function uploadFiles(area, fileList, progressBox, done) {
+function uploadFiles(area, fileList, progressBox, done, extra = {}) {
   [...fileList].forEach((file) => {
     const row = document.createElement("div");
     row.className = "up-row";
@@ -790,6 +880,7 @@ function uploadFiles(area, fileList, progressBox, done) {
     const fd = new FormData();
     fd.append("files", file);
     if ($("#up-note")) { fd.append("note", $("#up-note").value); fd.append("team", $("#up-team").value); }
+    Object.entries(extra).forEach(([k, v]) => v && fd.append(k, v));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/files/${area}`);
     xhr.upload.onprogress = (e) => {

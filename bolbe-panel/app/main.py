@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import convert, export, products, runner, storage
+from . import convert, export, folders, products, runner, storage
 from .team import AGENTS, REVISION_ROUTES, WORKFLOW_BY_ID, WORKFLOWS, public_management_view, public_team_view
 
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
@@ -258,10 +258,12 @@ async def files(area: str) -> list[dict[str, Any]]:
 
 @app.post("/api/files/{area}", dependencies=auth)
 async def upload_files(area: str, files: list[UploadFile] = File(...), note: str = Form(""),
-                       team: str = Form("genel")) -> list[dict[str, Any]]:
+                       team: str = Form("genel"), folder: str = Form("")) -> list[dict[str, Any]]:
     if area not in storage.AREAS:
         raise HTTPException(404, "Alan bulunamadı")
     saved = [storage.file_info(area, await storage.save_upload(area, f)) for f in files]
+    if area == "media":
+        await folders.place([s["name"] for s in saved], folder.strip() or folders.UPLOADS, auto=False)
     if area == "uploads" and (note.strip() or team != "genel"):
         await _set_file_notes([s["name"] for s in saved], note, team)
     await storage.log_activity(f"{len(saved)} dosya yüklendi ({area}): " + ", ".join(s["name"] for s in saved), "upload")
@@ -294,6 +296,74 @@ async def get_file(area: str, name: str, download: bool = False) -> FileResponse
     return FileResponse(path, filename=path.name, content_disposition_type="attachment" if as_attachment else "inline")
 
 
+# ---------------------------------------------------------------- galeri klasörleri
+
+
+@app.get("/api/media", dependencies=auth)
+async def media_listing() -> dict[str, Any]:
+    return await folders.listing(runner.TZ)
+
+
+class FolderBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+@app.post("/api/media/folders", dependencies=auth)
+async def create_folder(body: FolderBody) -> dict[str, Any]:
+    try:
+        return await folders.create(body.name)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.put("/api/media/folders/{fid}", dependencies=auth)
+async def rename_folder(fid: str, body: FolderBody) -> dict[str, Any]:
+    try:
+        return await folders.rename(fid, body.name)
+    except KeyError as exc:
+        raise HTTPException(404, "Klasör bulunamadı") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/media/folders/{fid}", dependencies=auth)
+async def delete_folder(fid: str) -> dict[str, Any]:
+    try:
+        await folders.remove(fid)
+    except KeyError as exc:
+        raise HTTPException(404, "Klasör bulunamadı") from exc
+    return {"ok": True}
+
+
+class MoveBody(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=500)
+    folder: str = Field("", max_length=20)
+
+
+@app.post("/api/media/move", dependencies=auth)
+async def move_media(body: MoveBody) -> dict[str, Any]:
+    try:
+        return {"moved": await folders.move(body.names, body.folder)}
+    except KeyError as exc:
+        raise HTTPException(404, "Klasör bulunamadı") from exc
+
+
+@app.get("/api/media/folders/{fid}/zip", dependencies=auth)
+async def folder_zip(fid: str) -> StreamingResponse:
+    try:
+        tmp, filename = await asyncio.to_thread(folders.zip_folder, fid)
+    except KeyError as exc:
+        raise HTTPException(404, "Klasör bulunamadı") from exc
+
+    def chunks():
+        with tmp:
+            while block := tmp.read(1024 * 1024):
+                yield block
+
+    return StreamingResponse(chunks(), media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(filename)}"})
+
+
 TEAM_IDS = {"genel", "takim-1", "takim-2", "takim-3", "takim-4"}
 
 
@@ -322,6 +392,8 @@ async def put_file_note(name: str, body: FileNoteBody) -> dict[str, Any]:
 @app.delete("/api/files/{area}/{name}", dependencies=auth)
 async def delete_file(area: str, name: str) -> dict[str, Any]:
     storage.area_file(area, name).unlink()
+    if area == "media":
+        await folders.forget(name)
     await storage.log_activity(f"Dosya silindi ({area}): {name}", "delete")
     return {"ok": True}
 
@@ -665,6 +737,7 @@ async def add_product_image(product_id: str, file: UploadFile = File(...), clean
     info = await asyncio.to_thread(products.crop_to_library, "uploads", raw.name, [0, 0, 1, 1], item["name"], clean)
     if not item.get("colors"):
         await products.save({"id": product_id, "colors": info["colors"]}, "Kurucu")
+    await folders.place([info["name"]], folders.PRODUCTS)
     result = await products.add_image(product_id, info["name"])
     return {**result, "warnings": info["warnings"]}
 

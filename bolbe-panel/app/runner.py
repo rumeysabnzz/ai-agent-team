@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import httpx
 
-from . import convert, products, storage
+from . import convert, folders, products, storage
 from .team import AGENTS, COMMON_RULES, DEFAULT_BRAND, DEFAULT_COMPETITORS, TEAMS, WORKFLOW_BY_ID, WORKFLOWS
 
 VIRALE_MCP_URL = os.getenv("VIRALE_MCP_URL", "")
@@ -597,6 +597,7 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
     if name == "save_media_from_url":
         saved = await download_media(args["url"], args["filename"])
         run.outputs.append({"type": "media", "name": saved})
+        await folders.place([saved], folders.folder_for_media(saved, agent, run, TZ))
         await storage.log_activity(f"{agent['name']} medya kaydetti: {saved}", "media")
         return f"Kaydedildi: {saved}"
     if name == "submit_for_approval":
@@ -644,6 +645,7 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
                                         **({} if existing and existing.get("colors") else {"colors": info["colors"]})}, agent["name"])
             await products.add_image(item["id"], info["name"], bool(args["primary"]))
             run.outputs.append({"type": "media", "name": info["name"]})
+            await folders.place([info["name"]], folders.PRODUCTS)
             await storage.log_activity(f"Ürün kütüphanesine görsel eklendi: {args['product_name']}", "media")
             report = f"Kaydedildi: media/{info['name']} (ürün {item['id']}). " + report
         else:
@@ -659,6 +661,7 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         res = await asyncio.to_thread(products.compose_to_media, args["scene"], args["product_id"], args["image"], args["box"],
                                       bool(args["shadow"]), args["filename"])
         run.outputs.append({"type": "media", "name": res["name"]})
+        await folders.place([res["name"]], folders.folder_for_media(res["name"], agent, run, TZ))
         await storage.log_activity(f"{agent['name']} ürünü sahneye yerleştirdi: {res['name']}", "media")
         text = (f"Kaydedildi: media/{res['name']}." + (f" Herkese açık bağlantı: {res['url']}" if res["url"] else "")
                 + (f" Not: {res['note']}" if res["note"] else "")
