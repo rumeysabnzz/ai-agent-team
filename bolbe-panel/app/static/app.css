@@ -528,6 +528,27 @@ pre.markdown{white-space:pre-wrap}
 .up-meta{display:grid;grid-template-columns:minmax(160px,220px) 1fr;gap:8px;margin-top:12px}
 .file-note{font-size:.84rem;color:var(--text);background:var(--surface-2);border-radius:8px;padding:4px 8px;margin-top:4px}
 
+/* ---------- sayfa içi onay / not pencereleri ---------- */
+.dlg{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(20,10,30,0);transition:background .18s}
+.dlg.show{background:var(--overlay)}
+.dlg-card{width:100%;max-width:480px;max-height:calc(100dvh - 40px);overflow:auto;background:var(--surface-solid);color:var(--text);border:1px solid var(--glass-edge);border-radius:22px;padding:22px;box-shadow:var(--shadow-lift);display:flex;flex-direction:column;gap:12px;transform:translateY(10px) scale(.98);opacity:0;transition:transform .18s,opacity .18s}
+.dlg.show .dlg-card{transform:none;opacity:1}
+.dlg-grip{display:none}
+.dlg-card h2{font-size:1.15rem;font-weight:800}
+.dlg-text{color:var(--muted);font-size:.95rem;overflow-wrap:anywhere}
+.dlg-media{display:flex;gap:6px;overflow-x:auto}
+.dlg-media>*{flex:0 0 auto;width:72px;height:90px;object-fit:cover;border-radius:10px;background:var(--surface-3)}
+.dlg-card textarea{min-height:110px}
+.dlg-chips{display:flex;gap:6px;flex-wrap:wrap}
+.dlg-chip{border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);border-radius:999px;padding:6px 12px;font-size:.85rem;cursor:pointer}
+.dlg-chip:hover{border-color:var(--brand);color:var(--brand)}
+.dlg-err{color:var(--red);font-size:.86rem;min-height:0}
+.dlg-err:empty{display:none}
+.dlg-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+.btn-danger-solid{background:#e11d48;color:#fff;border:none;font-weight:700}
+.btn-danger-solid:hover{background:#be123c}
+body.dlg-open{overflow:hidden}
+
 /* ---------- dar ekranlar ---------- */
 @media (max-width:1180px){
   .hub-area{height:auto;display:flex;flex-direction:column;gap:14px}
@@ -566,6 +587,12 @@ pre.markdown{white-space:pre-wrap}
   .tabbar a.active{color:#fff;background:var(--btn-grad);box-shadow:0 6px 16px rgba(var(--btn-glow),.35)}
   .tabbar .nav-badge{top:1px;right:calc(50% - 30px)}
   .cal-pop{position:fixed;left:12px;right:12px;top:calc(60px + env(safe-area-inset-top));width:auto}
+  /* telefonda pencere alttan açılan sayfa olur; düğmeler başparmak hizasında, klavye açılınca içerik kayar */
+  .dlg{align-items:flex-end;padding:0}
+  .dlg-card{max-width:none;border-radius:22px 22px 0 0;padding:10px 18px calc(18px + env(safe-area-inset-bottom));max-height:88dvh;transform:translateY(100%);opacity:1}
+  .dlg-grip{display:block;width:42px;height:5px;border-radius:3px;background:var(--line-strong);margin:2px auto 4px}
+  .dlg-actions{display:grid;grid-template-columns:1fr 1fr}
+  .dlg-actions .btn{min-height:48px}
   /* kompakt sayfa başı: açıklamalar gizli, eylem düğmeleri yan yana */
   .page-desc{display:none}
   .page-title{font-size:1.3rem!important}

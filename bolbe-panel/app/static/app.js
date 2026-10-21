@@ -62,6 +62,65 @@ function icon(name) {
 
 const state = { teams: [], agents: {}, live: {}, feed: [], es: null, agency: { name: "", tagline: "", client: "" } };
 
+/* Sayfa içi onay ve not pencereleri (tarayıcının confirm/prompt kutuları yerine).
+   Masaüstünde ortada kart, telefonda alttan açılan sayfa. Promise döner:
+   onayda true (veya yazılan metin), vazgeçince null. */
+function dialog({ title, text = "", input = null, ok = "Tamam", cancel = "Vazgeç", danger = false, media = "", chips = [] }) {
+  return new Promise((resolve) => {
+    const box = $("#dialog"), prevFocus = document.activeElement;
+    const field = input ? (input.multiline
+      ? `<textarea id="dlg-input" rows="4" placeholder="${esc(input.placeholder || "")}">${esc(input.value || "")}</textarea>`
+      : `<input id="dlg-input" type="text" placeholder="${esc(input.placeholder || "")}" value="${esc(input.value || "")}">`) : "";
+    box.innerHTML = `<div class="dlg-card">
+      <div class="dlg-grip" aria-hidden="true"></div>
+      <h2 id="dlg-title">${esc(title)}</h2>
+      ${media ? `<div class="dlg-media">${media}</div>` : ""}
+      ${text ? `<p class="dlg-text">${esc(text)}</p>` : ""}
+      ${field}
+      ${chips.length ? `<div class="dlg-chips">${chips.map((c) => `<button type="button" class="dlg-chip" data-chip="${esc(c)}">＋ ${esc(c)}</button>`).join("")}</div>` : ""}
+      <p class="dlg-err" id="dlg-err"></p>
+      <div class="dlg-actions"><button type="button" class="btn" data-dlg="cancel">${esc(cancel)}</button>
+        <button type="button" class="btn ${danger ? "btn-danger-solid" : "btn-gold"}" data-dlg="ok">${esc(ok)}</button></div></div>`;
+    box.hidden = false;
+    document.body.classList.add("dlg-open");
+    requestAnimationFrame(() => box.classList.add("show"));
+    const inp = $("#dlg-input", box);
+    inp?.addEventListener("input", () => ($("#dlg-err", box).textContent = ""));
+    setTimeout(() => (inp || $('[data-dlg="ok"]', box)).focus(), 60);
+    const close = (value) => {
+      box.classList.remove("show");
+      document.removeEventListener("keydown", onKey, true);
+      document.body.classList.remove("dlg-open");
+      setTimeout(() => { box.hidden = true; box.innerHTML = ""; prevFocus?.focus?.(); }, 180);
+      resolve(value);
+    };
+    const submit = () => {
+      if (!input) return close(true);
+      const v = inp.value.trim();
+      if (input.required && !v) { $("#dlg-err", box).textContent = input.required === true ? "Bu alan boş bırakılamaz" : input.required; inp.focus(); return; }
+      close(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter" && (!inp || inp.tagName !== "TEXTAREA" || e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); }
+      else if (e.key === "Tab") {   // odak pencere içinde kalsın
+        const f = $$("button, input, textarea", box); const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    box.onclick = (e) => {
+      if (e.target === box) return close(null);
+      const chip = e.target.closest("[data-chip]");
+      if (chip && inp) { inp.value = (inp.value.trim() ? inp.value.trim() + "\n" : "") + chip.dataset.chip; $("#dlg-err", box).textContent = ""; inp.focus(); return; }
+      const b = e.target.closest("[data-dlg]"); if (!b) return;
+      b.dataset.dlg === "ok" ? submit() : close(null);
+    };
+  });
+}
+const confirmDialog = (title, text, ok = "Evet", danger = true) => dialog({ title, text, ok, danger });
+
 function toast(msg) {
   const t = $("#toast");
   t.textContent = msg;
@@ -653,8 +712,18 @@ function pageApprovals() {
     }
     const act = e.target.closest("[data-act]")?.dataset.act; if (!act) return;
     let note = "";
-    if (act === "revise") { note = prompt("Ne değişsin? (ajan bu nota göre yeniden üretecek)", item.note || "") || ""; if (!note) return; }
-    if (act === "reject" && !confirm("Bu içerik reddedilsin mi?")) return;
+    const thumb = (item.media || []).slice(0, 4).map((m) => mediaTile(m, null, 160)).join("");
+    if (act === "revise") {
+      note = await dialog({ title: "Revize iste", text: `"${item.title}" · ajan bu nota göre yeni bir sürüm hazırlayacak.`, media: thumb,
+        input: { multiline: true, value: item.note || "", placeholder: "Ne değişsin? Ör. ürünü büyüt, başlığı kısalt, zemini marka pembesine çek", required: "Revize için ne değişeceğini yazın" },
+        chips: ["Ürünü büyüt", "Metni kısalt", "Daha sade", "Renkleri marka paletine çek", "Başlığı değiştir"], ok: "Revizeye gönder" });
+      if (note === null) return;
+    }
+    if (act === "reject") {
+      note = await dialog({ title: "İçeriği reddet", text: `"${item.title}" reddedilecek. Neden reddettiğinizi yazarsanız ekip bir dahakine bunu dikkate alır.`, media: thumb,
+        input: { multiline: true, placeholder: "Ret nedeni (isteğe bağlı)" }, ok: "Reddet", danger: true });
+      if (note === null) return;
+    }
     try {
       const r = await sendJSON("POST", `/api/approvals/${item.id}`, { action: act, note });
       toast(act === "approve" ? "Onaylandı" : act === "reject" ? "Reddedildi" : "Revize görevi başladı");
@@ -788,7 +857,8 @@ function pageGallery() {
     draw();
   };
   const newFolder = async () => {
-    const name = prompt("Klasör adı (ör. Ekim CICA lansmanı)"); if (!name?.trim()) return null;
+    const name = await dialog({ title: "Yeni klasör", input: { placeholder: "Ör. Ekim CICA lansmanı", required: "Klasör adı yazın" }, ok: "Oluştur" });
+    if (!name) return null;
     try { return await sendJSON("POST", "/api/media/folders", { name: name.trim() }); } catch (ex) { toast(ex.message); return null; }
   };
   const move = async (names, target) => {
@@ -807,12 +877,13 @@ function pageGallery() {
     const tab = e.target.closest("#m-tabs .tab"); if (tab) { kind = tab.dataset.k; return draw(); }
     if (e.target.closest("#f-select")) { selecting = !selecting; selected.clear(); return draw(); }
     if (e.target.closest("#f-rename")) {
-      const name = prompt("Yeni klasör adı", folderName(id)); if (!name?.trim()) return;
+      const name = await dialog({ title: "Klasörü yeniden adlandır", input: { value: folderName(id), required: "Klasör adı yazın" }, ok: "Kaydet" });
+      if (!name) return;
       try { await sendJSON("PUT", `/api/media/folders/${id}`, { name: name.trim() }); load(); } catch (ex) { toast(ex.message); }
       return;
     }
     if (e.target.closest("#f-del")) {
-      if (!confirm(`"${folderName(id)}" klasörü silinsin mi? İçindeki dosyalar silinmez, "Klasörsüz"e geçer.`)) return;
+      if (!await confirmDialog("Klasörü sil", `"${folderName(id)}" klasörü silinecek. İçindeki dosyalar silinmez, "Klasörsüz"e geçer.`, "Klasörü sil")) return;
       try { await api(`/api/media/folders/${id}`, { method: "DELETE" }); location.hash = "#/galeri"; } catch (ex) { toast(ex.message); }
       return;
     }
@@ -864,7 +935,7 @@ function openLightbox(name, kind, onDelete) {
   $("#lb-close").onclick = close;
   lb.onclick = (e) => { if (e.target === lb || e.target.classList.contains("lb-body")) close(); };
   if (onDelete) $("#lb-del").onclick = async () => {
-    if (!confirm(`"${name}" silinsin mi?`)) return;
+    if (!await confirmDialog("Dosyayı sil", `"${name}" kalıcı olarak silinecek.`, "Sil")) return;
     try { await api(src, { method: "DELETE" }); toast("Silindi"); close(); onDelete(); } catch (ex) { toast(ex.message); }
   };
 }
@@ -941,13 +1012,13 @@ function pageFiles() {
     const noteFor = e.target.closest("[data-note]")?.dataset.note;
     if (noteFor) {
       const f = items.find((x) => x.name === noteFor) || {};
-      const note = prompt("Ajanlar bu dosyayı nasıl kullansın?", f.note || "");
+      const note = await dialog({ title: "Dosya notu", text: noteFor, input: { multiline: true, value: f.note || "", placeholder: "Ajanlar bu dosyayı nasıl kullansın? Ör. bu fotoğraf story zemini olarak kullanılabilir" }, ok: "Kaydet" });
       if (note === null) return;
       try { await sendJSON("PUT", `/api/files/uploads/${encodeURIComponent(noteFor)}/note`, { note, team: f.team || "genel" }); toast("Not kaydedildi"); load(); } catch (ex) { toast(ex.message); }
       return;
     }
     const name = e.target.closest("[data-del]")?.dataset.del; if (!name) return;
-    if (!confirm(`"${name}" silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!await confirmDialog("Dosyayı sil", `"${name}" kalıcı olarak silinecek. Bu işlem geri alınamaz.`, "Sil")) return;
     try { await api(fileUrl(area, name), { method: "DELETE" }); toast("Dosya silindi"); load(); } catch (ex) { toast(ex.message); }
   });
   const drop = $("#drop"), input = $("#file-input");
@@ -1235,13 +1306,13 @@ function pageProducts() {
     }
     const rm = e.target.closest("[data-rmimg]");
     if (rm) {
-      if (!confirm("Bu görsel ürün kütüphanesinden kaldırılsın mı? (Dosya Galeri'de kalır)")) return;
+      if (!await confirmDialog("Görseli kaldır", "Bu görsel ürün kütüphanesinden kaldırılacak. Dosya Galeri'de kalır.", "Kaldır")) return;
       try { await api(`/api/products/${id}/images/${encodeURIComponent(rm.dataset.rmimg)}`, { method: "DELETE" }); load(); } catch (ex) { toast(ex.message); }
       return;
     }
     if (e.target.closest("[data-edit]")) return openForm(p);
     if (e.target.closest("[data-del]")) {
-      if (!confirm(`"${p.name}" kütüphaneden silinsin mi? (Görsel dosyaları Galeri'de kalır)`)) return;
+      if (!await confirmDialog("Ürünü sil", `"${p.name}" ürün kütüphanesinden silinecek. Görsel dosyaları Galeri'de kalır.`, "Ürünü sil")) return;
       try { await api(`/api/products/${id}`, { method: "DELETE" }); load(); } catch (ex) { toast(ex.message); }
     }
   });
@@ -1392,7 +1463,7 @@ function pageDevelopment() {
   view.addEventListener("click", async (e) => {
     const l = e.target.closest("[data-del-lesson]"), k = e.target.closest("[data-del-kb]");
     if (!l && !k) return;
-    if (!confirm("Silinsin mi?")) return;
+    if (!await confirmDialog(l ? "Dersi sil" : "Bilgi notunu sil", l ? "Bu ders ajanın hafızasından silinecek." : "Bu not takımın bilgi bankasından silinecek.", "Sil")) return;
     const [a, id] = (l ? l.dataset.delLesson : k.dataset.delKb).split(":");
     try { await api(l ? `/api/development/lessons/${a}/${id}` : `/api/development/knowledge/${a}/${id}`, { method: "DELETE" }); load(); } catch (ex) { toast(ex.message); }
   });
