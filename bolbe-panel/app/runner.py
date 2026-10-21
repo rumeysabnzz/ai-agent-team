@@ -286,17 +286,19 @@ CUSTOM_TOOLS.update({
                        "keep_boxes kesin ürün olan alanlar (zemine çok benzeyen beyaz gövde, şeffaf kısım, kapak/pompa), remove_boxes kesin "
                        "zemin olan alanlar (ürün sanılan gölge, yansıma, yandaki nesne); yoksa boş liste. rotate ürünün eğikliği (derece; "
                        "pozitif = üstü sağa yatık), ürün dikleştirilir; düzse 0. save false iken yalnız kontrol görseli döner, kütüphaneye "
-                       "eklenmez. Sonuç damalı, koyu ve kırmızı zemin üzerinde kontrol görseli olarak döner.",
+                       "eklenmez. replace_image bir kütüphane görselinin adıysa yeni görsel açılmaz, o görselin üzerine yazılır "
+                       "(eksik/bozuk dekupeyi düzeltmek için; yoksa \"\"). Sonuç damalı, koyu ve kırmızı zemin üzerinde kontrol "
+                       "görseli olarak döner; zeminle karışıp otomatik tamamlanan kısımlar (cam, kapak, pompa) dördüncü karede pembe.",
         "input_schema": {"type": "object", "additionalProperties": False,
                          "required": ["area", "name", "box", "product_name", "clean_background", "keep_boxes", "remove_boxes",
-                                      "rotate", "save", "primary"],
+                                      "rotate", "save", "primary", "replace_image"],
                          "properties": {"area": {"type": "string", "enum": ["uploads", "media"]}, "name": {"type": "string"},
                                         "box": {"type": "array", "items": {"type": "number"}},
                                         "product_name": {"type": "string"}, "clean_background": {"type": "boolean"},
                                         "keep_boxes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
                                         "remove_boxes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
                                         "rotate": {"type": "number"}, "save": {"type": "boolean"},
-                                        "primary": {"type": "boolean"}}},
+                                        "primary": {"type": "boolean"}, "replace_image": {"type": "string"}}},
     },
     "design_image": {
         "description": "Sistem içi tasarım stüdyosu: yazdığın SVG'yi PNG/JPEG görsele çevirir ve galeriye kaydeder (ücretsiz). "
@@ -325,6 +327,13 @@ CUSTOM_TOOLS.update({
                              "format": {"type": "string", "enum": list(studio.SIZES)},
                              "transition": {"type": "string", "enum": list(studio.TRANSITIONS)},
                              "audio": {"type": "string"}, "filename": {"type": "string"}}},
+    },
+    "repair_product_image": {
+        "description": "Bir ürün kütüphanesi görselini kontrol eder ve onarır: kapak, cam, pompa gibi zeminle karışıp silinmiş "
+                       "kısımları geri getirir. Görselin kaynak fotoğrafı biliniyorsa yeni yöntemle yeniden keser, bilinmiyorsa "
+                       "dosyanın kendi piksellerinden onarır. Önce/sonra kontrol görseli döner; geri getirilen kısımlar pembe.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["product_id", "image"],
+                         "properties": {"product_id": {"type": "string"}, "image": {"type": "string"}}},
     },
     "remove_product_image": {
         "description": "Ürün kütüphanesinden hatalı bir ürün görselini (ör. delikli, lekeli eski dekupe) kaldırır.",
@@ -355,7 +364,7 @@ CUSTOM_TOOLS.update({
     },
 })
 BASE_TOOLS = ["list_files", "read_file", "save_report", "add_lesson", "view_image", "search_archive"]
-LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "remove_product_image", "save_product", "list_products"]
+LIBRARY_TOOLS = ["extract_pdf_images", "crop_product", "repair_product_image", "remove_product_image", "save_product", "list_products"]
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 MAX_IMAGE_BYTES = 3_500_000
@@ -592,7 +601,7 @@ def tool_names_for(agent: dict[str, Any]) -> list[str]:
     if agent.get("compose"):
         names.append("compose_product")
     if agent.get("studio"):
-        names += ["design_image"]
+        names += ["design_image"] + [n for n in ("crop_product", "repair_product_image") if n not in names]
     if agent.get("video"):
         names += ["make_video"]
     if agent.get("product_images") and "save_media_from_url" not in names:
@@ -694,7 +703,8 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         missing = set(args.get("media", [])) - set(media)
         return f"Onaya gönderildi (kimlik {item['id']})." + (f" Bulunamayan medya: {', '.join(missing)}" if missing else "")
     if name == "list_products":
-        items = products.all_products()
+        items = [{**{k: v for k, v in p.items() if k != "meta"},
+                  "image_status": {n: products.image_status(p, n) for n in p.get("images", [])}} for p in products.all_products()]
         return json.dumps(items, ensure_ascii=False) if items else "Ürün kütüphanesi boş. Ürün görseli kullanma; Kurucudan ürün fotoğrafı yüklemesini iste."
     if name == "product_reference":
         return json.dumps(products.reference(args["product_id"]), ensure_ascii=False)
@@ -706,23 +716,34 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
         for b in [args["box"], *args["keep_boxes"], *args["remove_boxes"]]:
             if len(b) != 4:
                 raise ValueError("Her kutu dört sayı olmalı: [x0, y0, x1, y1]")
+        replace = (args.get("replace_image") or "").strip()
+        if replace and not any(replace in p.get("images", []) for p in products.all_products()):
+            raise ValueError(f"{replace} bir ürün kütüphanesi görseli değil")
         info = await asyncio.to_thread(products.crop_to_library, args["area"], args["name"], args["box"], args["product_name"],
                                        bool(args["clean_background"]), args["keep_boxes"], args["remove_boxes"],
-                                       float(args["rotate"]), bool(args["save"]))
+                                       float(args["rotate"]), bool(args["save"]), replace if args["save"] else "")
         preview = base64.b64encode(info.pop("preview")).decode()
         report = (f"Yöntem: {info['method']}. Boyut: {info['size'][0]}×{info['size'][1]} px. Renkler: {', '.join(info['colors'])}."
                   + ("".join(f"\nUyarı: {w}" for w in info["warnings"]) or "\nUyarı yok.")
                   + "\nKontrol görselinde delik, leke, kesik kapak/pompa, zemin artığı veya hale var mı bak.")
-        if info["name"]:
+        if info["name"] and replace:
+            owner = next(p for p in products.all_products() if replace in p.get("images", []))
+            await products.set_meta(owner["id"], replace, {"source": info["source"], "warnings": info["warnings"],
+                                                           "restored": info.get("restored", 0)})
+            await storage.log_activity(f"Ürün görseli yeniden kesildi: {replace}", "media")
+            report = f"Güncellendi: media/{replace} (ürün {owner['id']}). " + report
+        elif info["name"]:
             existing = next((p for p in products.all_products() if storage.slug(p["name"]) == storage.slug(args["product_name"])), None)
             item = await products.save({"name": args["product_name"],
                                         **({} if existing and existing.get("colors") else {"colors": info["colors"]})}, agent["name"])
             await products.add_image(item["id"], info["name"], bool(args["primary"]))
+            await products.set_meta(item["id"], info["name"], {"source": info["source"], "warnings": info["warnings"],
+                                                               "restored": info.get("restored", 0)})
             run.outputs.append({"type": "media", "name": info["name"]})
             await folders.place([info["name"]], folders.PRODUCTS)
             await storage.log_activity(f"Ürün kütüphanesine görsel eklendi: {args['product_name']}", "media")
             report = f"Kaydedildi: media/{info['name']} (ürün {item['id']}). " + report
-        else:
+        if not info["name"]:
             report = "Önizleme (kaydedilmedi; beğenirsen save true ile tekrar çağır). " + report
         return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": preview}},
                 {"type": "text", "text": report}]
@@ -746,6 +767,17 @@ async def execute_tool(ctx: ToolContext, name: str, args: dict[str, Any]) -> str
             return text
         return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(sheet).decode()}},
                 {"type": "text", "text": text + " Kareler soldan sağa zaman sırasıyla; akış ve okunabilirliği kontrol et."}]
+    if name == "repair_product_image":
+        res = await products.repair(args["product_id"], args["image"])
+        await storage.log_activity(f"{agent['name']} ürün görselini onardı: {args['image']}", "media")
+        text = (f"{args['image']}: {res['message']} Durum: {res['status']}."
+                + "".join(f"\nUyarı: {w}" for w in res["warnings"])
+                + "\nKontrol görselinde kapak, pompa, cam ve etiket tam mı bak. Hâlâ eksikse Dosyalar'daki orijinal fotoğraftan "
+                  "crop_product ile (replace_image bu görsel) yeniden kes; kapak/cam için keep_boxes ver.")
+        if not res.get("preview"):
+            return text
+        return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(res["preview"]).decode()}},
+                {"type": "text", "text": text}]
     if name == "remove_product_image":
         item = await products.remove_image(args["product_id"], args["image"])
         return f"Kaldırıldı. Ürünün kalan görselleri: {', '.join(item['images']) or 'yok'}; ana görsel: {item.get('primary') or 'yok'}."

@@ -39,6 +39,7 @@ STUDIO_GUIDE = """Tasarım stüdyosu (sistem içi, ücretsiz; Virale ile görsel
 - design_image ile tasarımı SVG olarak yaz. Ölçüler: feed 1080×1350, square 1080×1080, story 1080×1920; <svg> etiketinde width, height ve viewBox aynı ölçüde olsun.
 - Görsel dil: marka profilindeki renkleri kullan (yoksa yumuşak pastel zemin + koyu metin). linearGradient/radialGradient zeminler, yuvarlatılmış kartlar (rect rx), ince çizgiler, rozetler; bol boşluk; en fazla 2–3 renk ve 2 yazı kalınlığı.
 - Yazı: font-family "Inter" (font-weight 300–900). SVG satır kaydırmaz; her satırı ayrı <text> veya <tspan> ile yaz, başlıkta satır başına en fazla ~16 karakter (80–96 px), gövdede ~28 karakter (36–44 px). Kenarlardan en az 80 px içeride kal. Emoji kullanma.
+- Ürün görselini kullanmadan önce durumuna bak (list_products → image_status). "doğrulandı" değilse view_image ile incele: kapak, pompa, damlalık, cam gövde, etiket tam mı, delik/leke var mı? Eksik veya bozuksa önce repair_product_image ile onar; hâlâ eksikse Dosyalar'daki orijinal ürün fotoğrafından crop_product ile (replace_image o görsel, kapak/cam için keep_boxes) yeniden kes. Düzelmezse ürünü göstermeyen bir kompozisyon seç ve onay notuna yaz; eksik ürünü asla kullanma.
 - Ürün: list_products ile ürünün şeffaf zeminli ana görselini bul ve <image href="media:DOSYA" x y width height preserveAspectRatio="xMidYMax meet"/> ile yerleştir; altına yumuşak gölge için düşük opaklıkta koyu bir elips koy. Ürünü yeniden çizme, etiket metni yazma; görsel zaten gerçek ürün. Kütüphanede olmayan ürünü gösterme.
 - Fotoğraf: Kurucunun yüklediği sahne/model fotoğraflarını <image href="uploads:DOSYA" preserveAspectRatio="xMidYMid slice"/> ile zemin yapabilirsin; üstüne okunurluk için yarı saydam koyu/açık katman koy.
 - filter (feGaussianBlur vb.), script, foreignObject ve dış bağlantı kullanma.
@@ -164,7 +165,8 @@ Yöntem:
    - Zemine çok benzeyen ürün alanlarını keep_boxes ile, ürün sanılabilecek gölge/yansıma/yan nesneleri remove_boxes ile işaretle. Ürün eğikse rotate ile dikleştir.
    - Önce save false ile önizleme al; kontrol görselinde (damalı, koyu, kırmızı zemin) delik, leke, kesik kapak/pompa, zemin artığı veya hale varsa kutuları düzeltip tekrar dene (en fazla 4 deneme).
      Temizse save true ile kaydet. 4 denemede temiz çıkmazsa en iyisini kaydetme; raporda bu ürün için yeni çekim iste.
-   - Kütüphanedeki eski görselleri de view_image ile kontrol et; delikli/lekeli olanı aynı ürünün orijinal yüklemesinden yeniden kes ve eskisini remove_product_image ile kaldır.
+   - Kapak, pompa, damlalık, şeffaf cam veya plastik gibi zeminle karışan kısımlar silinmemeli: kontrol görselinin dördüncü karesinde pembe görünen yerler otomatik geri getirilen kısımlardır; ürüne aitse doğru, gölge/zeminse remove_boxes ile sil. Eksik kalan kısım varsa o kısmı keep_boxes ile işaretleyip tekrar dene.
+   - Kütüphanedeki tüm görselleri list_products'taki image_status ile gözden geçir; "doğrulandı" olmayanları repair_product_image ile kontrol edip onar. Onarılamayanı orijinal yüklemeden crop_product ile (replace_image o görsel) yeniden kes; kaynak fotoğraf yoksa raporda yeni fotoğraf iste.
 4. save_product ile kimlik kartını doldur: ad (etiketteki gibi), kategori, hacim, fiyat (biliniyorsa), ambalaj (şişe/tüp/kavanoz, malzeme, kapak, şekil), etiket yazısı (görünen metin birebir), renkler (hex), öne çıkan içerikler, kısa görsel tarif.
 5. Var olan ürünleri list_products ile kontrol et; aynı ürünü ikinci kez açma, eksik bilgiyi tamamla ve daha iyi görsel bulduysan ekle.
 Sonunda save_report ile kısa bir "Ürün Kütüphanesi Durumu" raporu kaydet: eklenen/güncellenen ürünler, görseli eksik veya kalitesi yetersiz ürünler, Kurucudan istenen fotoğraflar
@@ -328,7 +330,7 @@ WORKFLOWS += [
     {
         "id": "urun-kutuphanesi", "team": "takim-3", "name": "Ürün kütüphanesini güncelle",
         "steps": ["urun-kutuphanecisi"],
-        "brief": "Kurucunun yüklediği fotoğraf ve kataloglardan BOLBÉ ürünlerinin temiz, şeffaf zeminli referans görsellerini (dekupe) ve görsel kimlik kartlarını çıkar; kütüphanedeki delikli veya lekeli eski görselleri yeniden kes ve kaldır.",
+        "brief": "Kurucunun yüklediği fotoğraf ve kataloglardan BOLBÉ ürünlerinin temiz, şeffaf zeminli referans görsellerini (dekupe) ve görsel kimlik kartlarını çıkar. Kütüphanedeki tüm görselleri kontrol et: kapağı, camı, pompası silinmiş veya delikli olanları repair_product_image ile onar, olmazsa orijinal fotoğraftan yeniden kes.",
         "schedule": {"kind": "manual"},
     },
 ]

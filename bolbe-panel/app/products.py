@@ -120,7 +120,7 @@ def summary_for_prompt(limit: int = 30) -> str:
     for p in all_products()[:limit]:
         bits = [p["name"], p.get("category", ""), p.get("size", ""), ", ".join(p.get("colors", []) or [])]
         rows.append(f"- {p['id']}: " + " · ".join(b for b in bits if b)
-                    + (f" (referans görsel: {p['primary']})" if p.get("primary") else " (görsel yok)"))
+                    + (f" (referans görsel: {p['primary']}, {image_status(p, p['primary'])})" if p.get("primary") else " (görsel yok)"))
     return "\n".join(rows)
 
 
@@ -131,6 +131,7 @@ def reference(product_id: str) -> dict[str, Any]:
     names = ([p["primary"]] if p.get("primary") else []) + [i for i in p.get("images", []) if i != p.get("primary")]
     urls = [u for u in (public_url(n) for n in names[:6]) if u]
     return {**{k: p.get(k) for k in ("id", *FIELDS)}, "reference_images": names[:6], "reference_urls": urls,
+            "image_status": {n: image_status(p, n) for n in names[:6]},
             "not": ("Bu bağlantıları Virale'de images / referenceImages (role: subject) olarak ver."
                     if urls else "Panelin herkese açık adresi bilinmiyor (PUBLIC_BASE_URL); referans bağlantısı üretilemedi.")}
 
@@ -179,6 +180,79 @@ def _rect_px(box: list[float], w: int, h: int) -> tuple[int, int, int, int]:
     return int(x0 * w), int(y0 * h), int(round(x1 * w)), int(round(y1 * h))
 
 
+def _complete(small: Any, fg: Any, rect: tuple[int, int, int, int], sure_bg: Any) -> tuple[Any, str]:
+    """GrabCut'ın zemin sandığı ama ürüne ait kısımları geri getirir: şeffaf cam, şeffaf kapak, ince pompa, zemine
+    çok yakın renkli plastik. Kutunun dışındaki zeminden pürüzsüz bir "boş zemin" yüzeyi (2. derece polinom)
+    tahmin edilir; kutu içinde bu yüzeyden belirgin farklı her piksel ve kenar çizgileri ürün adayıdır. Adaylar
+    kapanıp içleri doldurulur, yalnız ürüne değen parçalar eklenir. Zemin düz değilse (sahne, desen) atlanır."""
+    import cv2
+    import numpy as np
+
+    sh, sw = fg.shape
+    px0, py0, px1, py1 = rect
+    ys, xs = np.nonzero(sure_bg)
+    if len(xs) < 200:
+        return fg, "skipped"
+    pick = np.random.default_rng(7).choice(len(xs), size=min(len(xs), 6000), replace=False)
+    xs, ys = xs[pick], ys[pick]
+    def feats(x: Any, y: Any) -> Any:
+        x, y = x / sw, y / sh
+        return np.stack([np.ones_like(x), x, y, x * x, x * y, y * y], axis=1)
+    A = feats(xs.astype(float), ys.astype(float))
+    img = small.astype(float)
+    gy, gx = np.mgrid[0:sh, 0:sw]
+    F = feats(gx.ravel().astype(float), gy.ravel().astype(float))
+    plate = np.zeros_like(img)
+    resid = []
+    for c in range(3):
+        coef, *_ = np.linalg.lstsq(A, img[ys, xs, c], rcond=None)
+        plate[..., c] = (F @ coef).reshape(sh, sw)
+        resid.append(img[ys, xs, c] - A @ coef)
+    noise = float(np.abs(np.stack(resid)).max(axis=0).std() + np.abs(np.stack(resid)).max(axis=0).mean())
+    if noise > 14:   # dokulu/sahne zemini: yüzey tahmini güvenilmez
+        return fg, "skipped"
+    diff = np.abs(img - plate).max(axis=2)
+    thr = max(7.0, noise * 2.5)
+    # gölge: zeminin her kanalda aynı oranda koyulaşması (renk değişmez). Ürün sayılmasın.
+    ratio = (img + 1) / (plate + 1)
+    shadow = (ratio.max(axis=2) < 0.985) & ((ratio.max(axis=2) - ratio.min(axis=2)) < 0.03)
+    diff[shadow] = 0
+    cand = np.zeros((sh, sw), np.uint8)
+    # kutunun biraz dışına taşan uçlar (pompa ağzı, damlalık) da yakalansın
+    rx, ry = max(2, int((px1 - px0) * 0.06)), max(2, int((py1 - py0) * 0.06))
+    y0, y1, x0, x1 = max(0, py0 - ry), min(sh, py1 + ry), max(0, px0 - rx), min(sw, px1 + rx)
+    region = np.zeros((sh, sw), bool)
+    region[y0:y1, x0:x1] = True
+    cand[(diff > thr) & region] = 255
+    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), (3, 3), 0)
+    edges = cv2.Canny(gray, 10, 30)
+    cand[(edges > 0) & region & ~cv2.dilate(shadow.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)] = 255
+    if cand[py0:py1, px0:px1].mean() / 255 > 0.92:
+        return fg, "skipped"
+    k = max(3, int(min(px1 - px0, py1 - py0) * 0.03)) | 1
+    cand = cv2.morphologyEx(cand, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    cand = cv2.morphologyEx(cand, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    # adayların içini doldur
+    flood = cand.copy()
+    ffm = np.zeros((sh + 2, sw + 2), np.uint8)
+    cv2.floodFill(flood, ffm, (0, 0), 128)
+    cand[flood == 0] = 255
+    # yalnız mevcut ürüne değen aday parçaları ekle
+    count, labels = cv2.connectedComponents(cand, connectivity=8)
+    touch = cv2.dilate(fg, np.ones((5, 5), np.uint8)) > 0
+    good = np.unique(labels[touch & (cand > 0)])
+    good = good[good > 0]
+    if not len(good):
+        return fg, "none"
+    add = np.isin(labels, good)
+    # aday, ürünün kendisinden çok büyükse (zemin lekesi/gölge sızması) ekleme
+    if add.sum() > 1.6 * max(1, int((fg > 0).sum())):
+        return fg, "skipped"
+    out = fg.copy()
+    out[add] = 255
+    return out, "done"
+
+
 def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | None = None,
                  remove: list[list[float]] | None = None) -> tuple[Image.Image, dict[str, Any]]:
     """Ürünü renk ve doku farkıyla zeminden ayırır (GrabCut).
@@ -217,13 +291,19 @@ def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | N
     band = max(2, int(min(sw, sh) * 0.015))
     px0, py0 = max(px0, band), max(py0, band)
     px1, py1 = min(px1, sw - band), min(py1, sh - band)
+    # kutu biraz dar çizilmişse kapak/pompa ucu dışarıda kalabilir: kutunun hemen çevresi kesin değil "muhtemel zemin"
+    ring_x, ring_y = max(2, int((px1 - px0) * 0.06)), max(2, int((py1 - py0) * 0.06))
+    mask[max(band, py0 - ring_y):min(sh - band, py1 + ring_y), max(band, px0 - ring_x):min(sw - band, px1 + ring_x)] = cv2.GC_PR_BGD
     mask[py0:py1, px0:px1] = cv2.GC_PR_FGD
     for b in remove or []:
         x0, y0, x1, y1 = to_small(b)
         mask[y0:y1, x0:x1] = cv2.GC_BGD
-    for b in keep or []:
-        x0, y0, x1, y1 = to_small(b)
-        mask[y0:y1, x0:x1] = cv2.GC_FGD
+    keep_small = [to_small(b) for b in keep or []]
+    for x0, y0, x1, y1 in keep_small:
+        # keep kutusu kaba çizilir: ortası kesin ürün, kenarları muhtemel ürün (köşelerdeki zemin silinebilsin)
+        mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
+        ix, iy = (x1 - x0) // 5, (y1 - y0) // 5
+        mask[y0 + iy:y1 - iy, x0 + ix:x1 - ix] = cv2.GC_FGD
     bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
     cv2.setRNGSeed(7)   # aynı girdi her seferinde aynı sonucu versin (önizleme = kayıt)
     cv2.grabCut(cv2.cvtColor(small, cv2.COLOR_RGB2BGR), mask, None, bgd, fgd, 6, cv2.GC_INIT_WITH_MASK)
@@ -239,6 +319,9 @@ def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | N
     kept = [i for i in range(1, count) if stats[i, cv2.CC_STAT_AREA] >= 0.02 * largest_area]
     pieces = len(kept)
     fg = np.where(np.isin(labels, kept), 255, 0).astype(np.uint8)
+    # zeminle karışan kısımları (şeffaf cam, kapak, ince pompa) tamamla
+    before = fg.copy()
+    fg, completion = _complete(small, fg, (px0, py0, px1, py1), mask == cv2.GC_BGD)
     # ürünün içinde kalan delikleri doldur (beyaz gövdede zemin sanılan lekeler)
     flood = fg.copy()
     ff_mask = np.zeros((sh + 2, sw + 2), np.uint8)
@@ -248,6 +331,8 @@ def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | N
     holes = flood == 0
     hole_ratio = float(holes.sum()) / max(1, int((fg > 0).sum()))
     fg[holes] = 255
+    restored = (fg > 0) & (before == 0)
+    restored_ratio = float(restored.sum()) / max(1, int((fg > 0).sum()))
 
     # tam boyuta büyüt, kenarı yumuşat ve 1 piksel içeri çek (zemin rengi halesini azaltır)
     alpha = cv2.resize(fg, (aw, ah), interpolation=cv2.INTER_LINEAR) if scale < 1 else fg
@@ -257,14 +342,18 @@ def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | N
     alpha = cv2.GaussianBlur(alpha, (0, 0), 0.6 + 0.6 * edge)
 
     ys, xs = np.where(alpha > 8)
-    out = Image.fromarray(np.dstack([area, alpha]), "RGBA").crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+    crop_box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    out = Image.fromarray(np.dstack([area, alpha]), "RGBA").crop(crop_box)
+    rmask = restored.astype(np.uint8) * 255
+    rmask = cv2.resize(rmask, (aw, ah), interpolation=cv2.INTER_NEAREST) if scale < 1 else rmask
+    restored_img = Image.fromarray(rmask, "L").crop(crop_box)
     # kalite bilgileri: ürün kutunun kenarına dayanıyorsa kesilmiş olabilir; kutunun çok azı ürünse kesim kaçmıştır
     rect_area = max(1, (px1 - px0) * (py1 - py0))
     fill = float((fg[py0:py1, px0:px1] > 0).sum()) / rect_area
     touch = []
     for side, strip in (("sol", fg[py0:py1, px0:px0 + 2]), ("sağ", fg[py0:py1, px1 - 2:px1]),
                         ("üst", fg[py0:py0 + 2, px0:px1]), ("alt", fg[py1 - 2:py1, px0:px1])):
-        if strip.size and (strip > 0).mean() > 0.25:
+        if strip.size and (strip > 0).mean() > 0.04:
             touch.append(side)
     warnings = []
     if fill < 0.25:
@@ -278,8 +367,14 @@ def smart_cutout(img: Image.Image, box: list[float], keep: list[list[float]] | N
                         "Parçalardan biri zemin artığıysa remove kutusuyla sil.")
     if hole_ratio > 0.02:
         warnings.append(f"Ürün içindeki boşluklar dolduruldu (ürünün %{hole_ratio * 100:.0f}'i); şeffaf/delikli ürünse kontrol et.")
+    if completion == "skipped":
+        warnings.append("Zemin düz olmadığı için şeffaf/silik kısım tamamlama yapılamadı; kapak, cam veya pompa eksikse keep kutusuyla işaretle.")
+    if restored_ratio > 0.01:
+        warnings.append(f"Zeminle karışan kısımlar kenar çizgisinden tamamlandı (ürünün %{restored_ratio * 100:.0f}'i; önizlemede pembe). "
+                        "Tamamlanan yer gölge veya zeminse remove kutusuyla sil.")
     return out, {"method": "grabcut", "fill": round(fill, 2), "pieces": pieces, "holes_filled": round(hole_ratio, 3),
-                 "warnings": warnings}
+                 "restored": round(restored_ratio, 3), "restored_mask": restored_img, "warnings": warnings,
+                 "area_alpha": (alpha, cx0, cy0)}
 
 
 def auto_box(img: Image.Image) -> list[float] | None:
@@ -321,12 +416,33 @@ def straighten(img: Image.Image, degrees: float) -> Image.Image:
     return out.crop(bbox) if bbox else out
 
 
-def check_sheet(img: Image.Image, height: int = 520) -> bytes:
-    """Dekupeyi damalı, koyu ve renkli zemin üzerinde yan yana gösteren kontrol görseli (JPEG)."""
+def straighten_mask(mask: Image.Image, degrees: float, product: Image.Image) -> Image.Image:
+    """Önizleme işaretini ürünle aynı döndürme ve kırpmadan geçirir."""
+    if not degrees:
+        return mask
+    rotated_product = product.convert("RGBA").rotate(float(degrees), resample=Image.BICUBIC, expand=True)
+    bbox = rotated_product.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    out = mask.rotate(float(degrees), resample=Image.NEAREST, expand=True)
+    return out.crop(bbox) if bbox else out
+
+
+def check_sheet(img: Image.Image, height: int = 520, restored: Image.Image | None = None) -> bytes:
+    """Dekupeyi damalı, koyu ve renkli zemin üzerinde yan yana gösteren kontrol görseli (JPEG).
+    restored verilirse dördüncü karede zeminle karışıp geri getirilen kısımlar pembe gösterilir."""
     item = img.convert("RGBA")
     item.thumbnail((height, height - 40))
     pw = item.width + 40
-    sheet = Image.new("RGB", (pw * 3, height), "white")
+    tiles = 4 if restored is not None and restored.getbbox() else 3
+    sheet = Image.new("RGB", (pw * tiles, height), "white")
+    if tiles == 4:
+        mark = restored.resize(item.size)
+        tile = Image.new("RGB", (pw, height), (245, 245, 245))
+        base = Image.new("RGBA", item.size, (0, 0, 0, 0))
+        base.paste(item, (0, 0), item)
+        pink = Image.new("RGBA", item.size, (255, 0, 140, 170))
+        base.paste(pink, (0, 0), mark)
+        tile.paste(base, ((pw - item.width) // 2, (height - item.height) // 2), base)
+        sheet.paste(tile, (pw * 3, 0))
     for i, bg in enumerate(("checker", (34, 34, 38), (233, 71, 90))):
         tile = Image.new("RGB", (pw, height), (255, 255, 255))
         if bg == "checker":
@@ -387,10 +503,11 @@ def extract_pdf_images(name: str) -> list[str]:
 
 def crop_to_library(area: str, name: str, box: list[float], product_name: str, clean_background: bool,
                     keep: list[list[float]] | None = None, remove: list[list[float]] | None = None,
-                    rotate: float = 0.0, save: bool = True) -> dict[str, Any]:
+                    rotate: float = 0.0, save: bool = True, replace: str = "") -> dict[str, Any]:
     """Ürünü görselden ayırır (zemin temizleme istenirse akıllı kesim), dikleştirir, media alanına PNG kaydeder.
 
     save False ise yalnız kontrol görseli üretilir; ajan sonucu beğenene kadar kutuları düzeltip dener.
+    replace verilirse yeni dosya açmak yerine o kütüphane görselinin üzerine yazar (tasarımlardaki bağlantılar korunur).
     """
     path = storage.area_file(area, name)
     img = Image.open(path)
@@ -416,16 +533,93 @@ def crop_to_library(area: str, name: str, box: list[float], product_name: str, c
             info = {"method": "kenardan doldurma (OpenCV yok)", "warnings": []}
     else:
         out = img.crop((int(x0 * w), int(y0 * h), int(x1 * w), int(y1 * h))).convert("RGBA")
+    restored = info.pop("restored_mask", None)
+    info.pop("area_alpha", None)
+    if restored is not None:
+        restored = straighten_mask(restored, rotate, out)
     out = _fit(straighten(out, rotate))
+    if restored is not None:
+        restored = restored.resize(out.size)
     info["size"] = list(out.size)
     info["colors"] = dominant_colors(out)
-    info["preview"] = check_sheet(out)
+    info["preview"] = check_sheet(out, restored=restored)
     info["name"] = ""
+    info["source"] = {"area": area, "name": name, "box": [x0, y0, x1, y1], "keep": keep or [], "remove": remove or [],
+                      "rotate": rotate, "clean": clean_background}
     if save:
-        target = storage.unique_path("media", f"urun-{storage.slug(product_name)}.png")
-        out.save(target, "PNG", optimize=True)
+        target = media_path(replace) if replace else storage.unique_path("media", f"urun-{storage.slug(product_name)}.png")
+        tmp = target.with_name(target.name + ".part")
+        out.save(tmp, format="PNG", optimize=True)
+        tmp.replace(target)
         info["name"] = target.name
     return info
+
+
+def image_status(p: dict[str, Any], name: str) -> str:
+    meta = (p.get("meta") or {}).get(name)
+    if not meta:
+        return "kontrol edilmedi"
+    if meta.get("warnings"):
+        return "eksik olabilir"
+    if meta.get("repaired_in_place"):
+        return "onarıldı, gözle kontrol edilmeli"
+    return "doğrulandı"
+
+
+async def set_meta(product_id: str, name: str, meta: dict[str, Any]) -> None:
+    async with storage.state_lock:
+        items = storage.read_state(STATE, [])
+        item = next((p for p in items if p["id"] == product_id), None)
+        if item is None:
+            return
+        item.setdefault("meta", {})[name] = {**(item.get("meta") or {}).get(name, {}), **meta, "checked": storage.now()}
+        storage.write_state(STATE, items)
+
+
+def repair_in_place(name: str) -> dict[str, Any]:
+    """Kaynak fotoğrafı bilinmeyen eski dekupeyi kendi pikselleriyle onarır. Şeffaf yapılmış piksellerin rengi
+    dosyada durduğu için görsel, kesilmeden önceki kırpıntı gibi yeniden kesilir (akıllı kesim + tamamlama) ve
+    eski ürün alanıyla birleştirilir; silinmiş kapak, pompa, cam geri gelir. Görselin dışına kırpılıp atılmış
+    kısımlar geri gelmez; onlar için orijinal fotoğraftan yeniden kesmek gerekir."""
+    import numpy as np
+
+    path = media_path(name)
+    with Image.open(path) as img:
+        rgba = img.convert("RGBA")
+    alpha = np.array(rgba.getchannel("A"))
+    if alpha.min() == 255:
+        return {"restored": 0.0, "warnings": ["Görsel şeffaf zeminli değil; dekupe değil, orijinal fotoğraftan kesilmeli."]}
+    w, h = rgba.size
+    pad = max(12, int(max(w, h) * 0.08))
+    # zemin örneği: kırpıntının kenar piksellerini dışa doğru uzat
+    import cv2
+
+    rgb = cv2.copyMakeBorder(np.array(rgba.convert("RGB")), pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+    canvas = Image.fromarray(rgb)
+    W, H = canvas.size
+    box = [pad / W, pad / H, (pad + w) / W, (pad + h) / H]
+    try:
+        _, info = smart_cutout(canvas, box)
+    except ValueError as exc:
+        return {"restored": 0.0, "warnings": [f"Onarılamadı: {exc}"]}
+    # yeni maskeyi eski görselin koordinatlarına taşı
+    area_alpha, ax, ay = info.pop("area_alpha")
+    new_alpha = np.zeros((H, W), np.uint8)
+    new_alpha[ay:ay + area_alpha.shape[0], ax:ax + area_alpha.shape[1]] = area_alpha
+    new_alpha = new_alpha[pad:pad + h, pad:pad + w]
+    merged = np.maximum(alpha, new_alpha)
+    added = (merged > 128) & (alpha <= 128)
+    ratio = float(added.sum()) / max(1, int((merged > 128).sum()))
+    if ratio > 0.002:
+        out = Image.fromarray(np.dstack([np.array(rgba)[..., :3], merged]), "RGBA")
+        tmp = path.with_name(path.name + ".part")
+        out.save(tmp, format="PNG", optimize=True)
+        tmp.replace(path)
+    mark = Image.fromarray((added * 255).astype(np.uint8), "L")
+    with Image.open(path) as img:
+        preview = check_sheet(img.convert("RGBA"), restored=mark)
+    return {"restored": round(ratio, 3), "warnings": [w for w in info["warnings"] if "kenarlarına dayanıyor" not in w
+                                                      and "tamamlandı" not in w], "preview": preview}
 
 
 async def remove_image(product_id: str, media_name: str) -> dict[str, Any]:
@@ -534,3 +728,38 @@ def compose_to_media(scene_name: str, product_id: str, image: str, box: list[flo
 
 def media_path(name: str) -> Path:
     return storage.area_file("media", name)
+
+
+async def repair(product_id: str, image: str) -> dict[str, Any]:
+    """Kütüphane görselini kontrol edip onarır. Kaynak fotoğraf biliniyorsa yeni yöntemle yeniden keser
+    (tamamen silinmiş kapak da geri gelir), bilinmiyorsa dosyanın kendi piksellerinden onarır."""
+    import asyncio
+
+    p = get(product_id)
+    if not p:
+        raise ValueError(f"Ürün bulunamadı: {product_id}")
+    if image not in p.get("images", []):
+        raise ValueError(f"{image} bu ürünün kütüphane görseli değil")
+    src = ((p.get("meta") or {}).get(image) or {}).get("source")
+    if src and src.get("clean"):
+        try:
+            storage.area_file(src["area"], src["name"])
+        except Exception:  # noqa: BLE001 — kaynak silinmişse dosyadan onar
+            src = None
+    if src and src.get("clean"):
+        info = await asyncio.to_thread(crop_to_library, src["area"], src["name"], src["box"], p["name"], True,
+                                       src.get("keep"), src.get("remove"), float(src.get("rotate") or 0), True, image)
+        meta = {"source": info["source"], "warnings": info["warnings"], "restored": info.get("restored", 0)}
+        message = f"Kaynak fotoğraftan ({src['name']}) yeniden kesildi; ürünün %{info.get('restored', 0) * 100:.0f}'i zeminden geri getirildi."
+        preview = info["preview"]
+    else:
+        info = await asyncio.to_thread(repair_in_place, image)
+        meta = {"warnings": info["warnings"], "restored": info["restored"], "repaired_in_place": True}
+        message = (f"Dosyanın kendi piksellerinden onarıldı; ürünün %{info['restored'] * 100:.1f}'i geri getirildi."
+                   if info["restored"] > 0.002 else "Dosyada geri getirilecek silinmiş iç kısım bulunmadı.")
+        if not src:
+            message += " Kaynak fotoğraf bilinmiyor; görsel kenarında tamamen kesilmiş kapak/pompa varsa orijinal fotoğraftan yeniden kesilmeli."
+        preview = info.get("preview")
+    await set_meta(product_id, image, meta)
+    return {"message": message, "warnings": meta["warnings"], "preview": preview,
+            "status": "eksik olabilir" if meta["warnings"] else "onarıldı, gözle kontrol edilmeli" if meta.get("repaired_in_place") else "doğrulandı"}

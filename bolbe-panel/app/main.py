@@ -769,11 +769,23 @@ async def add_product_image(product_id: str, file: UploadFile = File(...), clean
     if raw.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
         raise HTTPException(400, "Yalnız jpg, png veya webp ürün görseli eklenebilir")
     info = await asyncio.to_thread(products.crop_to_library, "uploads", raw.name, [0, 0, 1, 1], item["name"], clean)
+    await products.set_meta(product_id, info["name"], {"source": info["source"], "warnings": info["warnings"],
+                                                       "restored": info.get("restored", 0)})
     if not item.get("colors"):
         await products.save({"id": product_id, "colors": info["colors"]}, "Kurucu")
     await folders.place([info["name"]], folders.PRODUCTS)
     result = await products.add_image(product_id, info["name"])
     return {**result, "warnings": info["warnings"]}
+
+
+@app.post("/api/products/{product_id}/images/{name}/repair", dependencies=auth)
+async def repair_product_image(product_id: str, name: str) -> dict[str, Any]:
+    try:
+        res = await products.repair(product_id, name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    await storage.log_activity(f"Ürün görseli onarıldı: {name}", "media")
+    return {k: v for k, v in res.items() if k != "preview"}
 
 
 @app.delete("/api/products/{product_id}/images/{name}", dependencies=auth)

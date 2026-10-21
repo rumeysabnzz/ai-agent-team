@@ -1115,6 +1115,12 @@ function pageContentHistory() {
 
 /* ------------------------------------------------------------ ürün kütüphanesi */
 
+function imgStatus(p, name) {
+  const m = (p.meta || {})[name];
+  if (!m) return chip("kontrol edilmedi", "gray");
+  return m.warnings && m.warnings.length ? `<span title="${esc(m.warnings.join(" "))}">${chip("eksik olabilir", "orange")}</span>` : chip("doğrulandı", "green");
+}
+
 function pageProducts() {
   view.innerHTML = `
     <div class="page-head"><div><h1 class="page-title">Ürünler</h1>
@@ -1155,7 +1161,7 @@ function pageProducts() {
       <div class="card pr-card" data-id="${p.id}">
         <div class="pr-img">${p.primary ? `<img src="${thumbUrl("media", p.primary, 480)}" loading="lazy" decoding="async" alt="${esc(p.name)}" data-lb="${esc(p.primary)}" data-k="image">` : `<span class="muted">Görsel yok</span>`}</div>
         ${p.images.length > 1 ? `<div class="pr-thumbs">${p.images.map((i) => `<img src="${thumbUrl("media", i, 120)}" loading="lazy" class="${i === p.primary ? "on" : ""}" data-primary="${esc(i)}" title="Ana görsel yap">`).join("")}</div>` : ""}
-        <h3>${esc(p.name)}</h3>
+        <h3>${esc(p.name)} ${p.primary ? imgStatus(p, p.primary) : ""}</h3>
         <div class="pr-chips">${[p.category, p.size, p.price].filter(Boolean).map((x) => chip(x, "gray")).join("")}</div>
         ${(p.colors || []).length ? `<div class="pr-colors">${p.colors.map((c) => `<span style="background:${esc(c)}" title="${esc(c)}"></span>`).join("")}<small>${p.colors.map(esc).join(" · ")}</small></div>` : ""}
         ${p.packaging ? `<p><b>Ambalaj:</b> ${esc(p.packaging)}</p>` : ""}
@@ -1166,6 +1172,7 @@ function pageProducts() {
         <div class="pr-card-actions">
           <label class="btn btn-sm">＋ Görsel<input type="file" accept="image/png,image/jpeg,image/webp" data-upload="${p.id}" hidden></label>
           <label class="pr-clean"><input type="checkbox" data-clean="${p.id}" checked> zemini temizle</label>
+          ${p.primary ? `<button class="btn btn-sm" data-repair="${esc(p.primary)}" title="Kapak, cam gibi silinmiş kısımları geri getir">⟲ Onar</button>` : ""}
           ${p.primary ? `<button class="btn btn-sm" data-rmimg="${esc(p.primary)}" title="Hatalı ana görseli kütüphaneden kaldır">✕ Görsel</button>` : ""}
           <button class="btn btn-sm" data-edit="${p.id}">✎ Düzenle</button>
           <button class="btn btn-sm btn-danger" data-del="${p.id}">✕</button>
@@ -1199,6 +1206,15 @@ function pageProducts() {
     const card = e.target.closest(".pr-card"); if (!card) return;
     const id = card.dataset.id, p = items.find((x) => x.id === id);
     if (prim) { await sendJSON("POST", `/api/products/${id}/primary`, { name: prim.dataset.primary }).catch((ex) => toast(ex.message)); return load(); }
+    const fix = e.target.closest("[data-repair]");
+    if (fix) {
+      fix.disabled = true; fix.innerHTML = `<span class="spinner"></span> Onarılıyor`;
+      try {
+        const r = await sendJSON("POST", `/api/products/${id}/images/${encodeURIComponent(fix.dataset.repair)}/repair`, {});
+        toast(r.message + (r.warnings.length ? ` ${r.warnings.join(" ")}` : ""));
+      } catch (ex) { toast(ex.message); }
+      return load();
+    }
     const rm = e.target.closest("[data-rmimg]");
     if (rm) {
       if (!confirm("Bu görsel ürün kütüphanesinden kaldırılsın mı? (Dosya Galeri'de kalır)")) return;
