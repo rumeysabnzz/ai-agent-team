@@ -1125,7 +1125,7 @@ function pageProducts() {
   view.innerHTML = `
     <div class="page-head"><div><h1 class="page-title">Ürünler</h1>
       <p class="page-desc">Markanın gerçek ürünleri. Görsel ekibi bu şeffaf zeminli görselleri sahnelere birebir yerleştirir, video ekibi ilk kare ve referans olarak kullanır; ürün tasarımı uydurulmaz.</p></div>
-      <div class="pr-actions"><button class="btn" id="pr-new">＋ Ürün ekle</button><button class="btn btn-gold" id="pr-run">▶ Dosyalardan güncelle</button></div></div>
+      <div class="pr-actions"><button class="btn" id="pr-new">＋ Ürün ekle</button><button class="btn" id="pr-fix-all">⟲ Tüm görselleri onar</button><button class="btn btn-gold" id="pr-run">▶ Dosyalardan güncelle</button></div></div>
     <div id="pr-note"></div>
     <form class="card pr-form" id="pr-form" hidden>
       <div class="card-title" id="pr-form-title">Ürün</div>
@@ -1189,6 +1189,24 @@ function pageProducts() {
     draw();
   };
   $("#pr-new").addEventListener("click", () => openForm());
+  // Tüm ürün görsellerini sırayla kontrol edip onarır (kapak, cam, pompa gibi silinmiş kısımlar)
+  $("#pr-fix-all").addEventListener("click", async (e) => {
+    const btn = e.currentTarget, jobs = items.flatMap((p) => (p.images || []).map((img) => [p.id, img]));
+    if (!jobs.length) return toast("Onarılacak ürün görseli yok");
+    btn.disabled = true;
+    let fixed = 0, warn = 0;
+    for (const [i, [id, img]] of jobs.entries()) {
+      btn.innerHTML = `<span class="spinner"></span> Onarılıyor ${i + 1}/${jobs.length}`;
+      try {
+        const r = await sendJSON("POST", `/api/products/${id}/images/${encodeURIComponent(img)}/repair`, {});
+        if (!/bulunmadı/.test(r.message)) fixed++;
+        if (r.warnings.length) warn++;
+      } catch { warn++; }
+    }
+    btn.disabled = false; btn.textContent = "⟲ Tüm görselleri onar";
+    toast(`${jobs.length} görsel kontrol edildi, ${fixed} onarıldı${warn ? `, ${warn} görselde sorun kaldı (kartlardaki turuncu etikete bakın)` : ""}`);
+    load();
+  });
   $("#pf-cancel").addEventListener("click", () => ($("#pr-form").hidden = true));
   $("#pr-run").addEventListener("click", async () => {
     try { const r = await sendJSON("POST", "/api/workflows/urun-kutuphanesi/run", { note: "" }); location.hash = `#/calisma?id=${r.id}`; } catch (ex) { toast(ex.message); }
