@@ -934,9 +934,49 @@ def _memory_prompt(agent: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+SCALARS = {"string", "number", "integer", "boolean"}
+DEFAULTS = {"string": "", "number": 0, "integer": 0, "boolean": False, "array": [], "object": {}}
+
+
+def _simple_schema(schema: dict[str, Any]) -> bool:
+    """Yalnız düz alanlı (metin, sayı, mantıksal, düz liste) araçlar strict tanımlanır. İç içe nesne/liste içeren
+    araçların (crop_product, make_video, design_image ...) strict grameri çok büyüyor ve API isteği reddediyor;
+    onların girdisi sunucuda _normalize_args ile tamamlanır."""
+    for prop in schema.get("properties", {}).values():
+        t = prop.get("type")
+        if t in SCALARS:
+            continue
+        if t == "array" and prop.get("items", {}).get("type") in SCALARS:
+            continue
+        return False
+    return True
+
+
+def _normalize_args(schema: dict[str, Any], args: Any) -> Any:
+    """Strict olmayan araçlarda eksik zorunlu alanları türüne göre varsayılanla doldurur, tanımsız alanları atar."""
+    if schema.get("type") == "object":
+        args = args if isinstance(args, dict) else {}
+        props = schema.get("properties", {})
+        out = {k: _normalize_args(props[k], v) for k, v in args.items() if k in props}
+        for k in schema.get("required", []):
+            if k not in out:
+                out[k] = DEFAULTS.get(props.get(k, {}).get("type", "string"), "")
+        return out
+    if schema.get("type") == "array":
+        items = args if isinstance(args, list) else []
+        return [_normalize_args(schema.get("items", {}), v) for v in items]
+    if schema.get("type") in ("number", "integer") and isinstance(args, str):
+        try:
+            return float(args) if schema["type"] == "number" else int(float(args))
+        except ValueError:
+            return 0
+    return args
+
+
 def _tools_for(agent: dict[str, Any], model: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     tools: list[dict[str, Any]] = [
-        {"name": n, "description": CUSTOM_TOOLS[n]["description"], "input_schema": CUSTOM_TOOLS[n]["input_schema"], "strict": True}
+        {"name": n, "description": CUSTOM_TOOLS[n]["description"], "input_schema": CUSTOM_TOOLS[n]["input_schema"],
+         "strict": _simple_schema(CUSTOM_TOOLS[n]["input_schema"])}
         for n in tool_names_for(agent)
     ]
     if agent.get("web"):
@@ -1021,6 +1061,13 @@ async def run_agent(run: Run, agent_id: str, task: str) -> str:
             await asyncio.sleep(30)
             continue
         except anthropic.BadRequestError as exc:
+            # strict araç grameri sınırı aşılırsa araçları serbest tanımla ve aynı turu tekrar dene
+            if "grammar" in str(exc) and any(t.get("strict") for t in tools):
+                for t in tools:
+                    if "strict" in t:
+                        t["strict"] = False
+                run.emit("agent_note", agent=agent_id, text="Araç tanımları sadeleştirildi; adım sürüyor")
+                continue
             # bozuk bir görsel tüm adımı düşürmesin: araç sonuçlarındaki görselleri metne çevirip bir kez daha dene
             if "image" not in str(exc) or not _drop_tool_images(messages):
                 raise
@@ -1076,7 +1123,11 @@ async def run_agent(run: Run, agent_id: str, task: str) -> str:
                 continue
             run.emit("tool", agent=agent_id, tool=block.name, detail=_short(block.input))
             try:
-                result, is_error = await execute_tool(ctx, block.name, block.input), False
+                args = block.input
+                spec = next((t for t in tools if t.get("name") == block.name and "input_schema" in t), None)
+                if spec is not None and not spec.get("strict"):
+                    args = _normalize_args(spec["input_schema"], args)
+                result, is_error = await execute_tool(ctx, block.name, args), False
             except Exception as exc:  # noqa: BLE001 — hata modele araç sonucu olarak döner
                 result, is_error = f"Hata: {exc}", True
                 run.emit("tool_error", agent=agent_id, detail=_short(result, 300))

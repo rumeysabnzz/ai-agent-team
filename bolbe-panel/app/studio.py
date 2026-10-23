@@ -152,6 +152,7 @@ async def make_video(scenes: list[dict[str, Any]], fmt: str, transition: str, au
         raise ValueError(f"format şunlardan biri olmalı: {', '.join(SIZES)}")
     if not 1 <= len(scenes) <= 12:
         raise ValueError("Video 1–12 sahneden oluşmalı")
+    transition = transition or "fade"
     if transition not in TRANSITIONS:
         raise ValueError(f"transition şunlardan biri olmalı: {', '.join(TRANSITIONS)}")
     w, h = SIZES[fmt]
