@@ -832,7 +832,8 @@ async def get_settings() -> dict[str, Any]:
                               for mid, m in runner.MODELS.items()],
             "integrations": {"claude": runner.api_ready(), "virale": bool(runner.VIRALE_MCP_URL), "model": runner.model_summary()},
             "budget": {"spent": round(runner.month_spend(), 2), "limit": runner.MONTHLY_BUDGET_USD},
-            "limits": {"generations_per_run": runner.MAX_GENERATIONS_PER_RUN, "turns": runner.MAX_TURNS},
+            "limits": {"generations_per_run": runner.MAX_GENERATIONS_PER_RUN, "turns": runner.MAX_TURNS,
+                       "virale_generation": runner.VIRALE_GENERATION},
             "version": BUILD_VERSION}
 
 

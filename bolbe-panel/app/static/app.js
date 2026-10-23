@@ -1125,7 +1125,7 @@ function pageSettings() {
       <dt>Modeller</dt><dd>${esc(s.integrations.model)}</dd>
       <dt>Virale (ChatPlace)</dt><dd>${s.integrations.virale ? chip("Bağlı", "green") : chip("VIRALE_MCP_URL yok", "orange")}</dd>
       <dt>Bu ay harcanan</dt><dd>${fmtUsd(s.budget.spent)} / ${fmtUsd(s.budget.limit)}<div class="budget-bar"><span style="width:${pct}%"></span></div></dd>
-      <dt>Üretim sınırı</dt><dd>Çalıştırma başına ${s.limits.generations_per_run} görsel/video</dd>
+      <dt>Görsel/video üretimi</dt><dd>${s.limits.virale_generation ? "Virale açık (çalıştırma başına " + s.limits.generations_per_run + " üretim)" : "Sistem içi stüdyo · Virale üretimi kapalı"}</dd>
       <dt>Tur sınırı</dt><dd>Ajan başına ${s.limits.turns} tur</dd>
       <dt>Panel sürümü</dt><dd>${esc(s.version)}</dd>`;
   }).catch((e) => toast(e.message));
